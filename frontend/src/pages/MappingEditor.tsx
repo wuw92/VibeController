@@ -47,6 +47,7 @@ export function MappingEditor({ controllerType = "xbox", onSave, onReset, initia
   const incomingActions = Object.fromEntries(Object.entries(incoming).map(([key, value]) => [key, value.startsWith("shortcut:") ? "keyboardShortcut" : value]));
   const incomingShortcuts = Object.fromEntries(Object.entries(incoming).filter(([, value]) => value.startsWith("shortcut:")).map(([key, value]) => [key, value.slice(9)]));
   const [selected, setSelected] = useState(controls[0]?.key ?? "x");
+  useEffect(() => setSelected(controls[0]?.key ?? "x"), [controls]);
   const [values, setValues] = useState(incomingActions);
   const [shortcuts, setShortcuts] = useState(incomingShortcuts);
   const [saved, setSaved] = useState(false);
@@ -91,7 +92,7 @@ export function MappingEditor({ controllerType = "xbox", onSave, onReset, initia
       </header>
 
       {!initialValues && <p role="status">等待主机配置；映射编辑暂不可用。</p>}
-      <fieldset className="editor-grid" disabled={!initialValues || resetting} style={{ border: 0, padding: 0, margin: 0 }}>
+      <fieldset className="editor-grid" disabled={!initialValues || resetting} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
         <section className="mapping-list" aria-label={`${presentation.statusName}按键列表`}>
           {controls.map(({ key, label, keycap }) => (
             <button key={key} type="button" aria-label={label} data-selected={selected === key} onClick={() => setSelected(key)}>

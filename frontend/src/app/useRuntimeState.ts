@@ -15,7 +15,11 @@ export const demoRuntimeState: RuntimeStatePayload = {
 export function useRuntimeState() {
   const [state, setState] = useState<RuntimeStatePayload>(demoRuntimeState);
 
-  useEffect(() => appBridge.subscribe((message) => setState(message.payload)), []);
+  useEffect(() => {
+    const unsubscribe = appBridge.subscribe((message) => setState(message.payload));
+    appBridge.send("requestState", {});
+    return unsubscribe;
+  }, []);
 
   return [state, setState] as const;
 }

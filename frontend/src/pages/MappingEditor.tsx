@@ -7,6 +7,11 @@ import type { ControllerType } from "../app/types";
 
 export type MappingValues = Record<string, string>;
 
+function serializeMappings(mappings: MappingValues) {
+  return JSON.stringify(Object.fromEntries(Object.entries(mappings)
+    .sort(([left], [right]) => left.localeCompare(right))));
+}
+
 const exclusiveActions = new Set(["dictation", "send", "cancel", "commandPalette", "previousChat", "nextChat", "activateCodex"]);
 const codexShortcutActions = new Set([
   "dictation", "send", "commandPalette", "previousChat", "nextChat",
@@ -52,9 +57,21 @@ export function MappingEditor({ controllerType = "xbox", onSave, onReset, initia
   const [shortcuts, setShortcuts] = useState(incomingShortcuts);
   const [saved, setSaved] = useState(false);
   const [resetting, setResetting] = useState(false);
-  const serializedIncoming = JSON.stringify(incoming);
+  const draftRevision = useRef(0);
+  const submissions = useRef<{ snapshot: string; revision: number }[]>([]);
+  const serializedIncoming = serializeMappings(incoming);
   const lastIncoming = useRef<string | undefined>(undefined);
   useEffect(() => {
+    const acknowledgedIndex = submissions.current
+      .map((submission) => submission.snapshot).lastIndexOf(serializedIncoming);
+    if (acknowledgedIndex >= 0) {
+      const acknowledged = submissions.current[acknowledgedIndex];
+      submissions.current.splice(0, acknowledgedIndex + 1);
+      if (!resetting && draftRevision.current > acknowledged.revision) {
+        lastIncoming.current = serializedIncoming;
+        return;
+      }
+    }
     if (lastIncoming.current === serializedIncoming && !resetting) return;
     lastIncoming.current = serializedIncoming;
     const mappings = JSON.parse(serializedIncoming) as MappingValues;
@@ -77,8 +94,17 @@ export function MappingEditor({ controllerType = "xbox", onSave, onReset, initia
   const actionLabel = describeMapping(values[selected], shortcuts[selected]);
 
   const changeAction = (action: string) => {
+    draftRevision.current++;
     setValues((current) => ({ ...current, [selected]: action }));
     setSaved(false);
+  };
+
+  const saveMapping = () => {
+    const mappings = Object.fromEntries(Object.entries(values).map(([key, value]) =>
+      [key, value === "keyboardShortcut" ? `shortcut:${shortcuts[key] ?? ""}` : value]));
+    submissions.current.push({ snapshot: serializeMappings(mappings), revision: draftRevision.current });
+    onSave(mappings);
+    setSaved(true);
   };
 
   return (
@@ -86,8 +112,8 @@ export function MappingEditor({ controllerType = "xbox", onSave, onReset, initia
       <header className="page-heading">
         <div><p className="eyebrow">Input map</p><h1>按键映射</h1><p>选择手柄按键，再绑定 Codex 快捷操作或键鼠输入。</p></div>
         <div className="page-actions">
-          <button className="quiet-button" type="button" disabled={!initialValues || resetting} onClick={() => { setResetting(true); setSaved(false); onReset(); }}><RotateCcw size={15}/>恢复默认</button>
-          <button className="primary-button" type="button" disabled={!initialValues || resetting} onClick={() => { onSave(Object.fromEntries(Object.entries(values).map(([key, value]) => [key, value === "keyboardShortcut" ? `shortcut:${shortcuts[key] ?? ""}` : value]))); setSaved(true); }}><Save size={15}/>保存映射</button>
+          <button className="quiet-button" type="button" disabled={!initialValues || resetting} onClick={() => { submissions.current = []; setResetting(true); setSaved(false); onReset(); }}><RotateCcw size={15}/>恢复默认</button>
+          <button className="primary-button" type="button" disabled={!initialValues || resetting} onClick={saveMapping}><Save size={15}/>保存映射</button>
         </div>
       </header>
 
@@ -111,7 +137,7 @@ export function MappingEditor({ controllerType = "xbox", onSave, onReset, initia
               <span>首次触发时读取 Codex 当前快捷键；修改 Codex 设置后会自动刷新。</span>
             </p>
           )}
-          {values[selected] === "keyboardShortcut" && <ShortcutRecorder value={shortcuts[selected] ?? ""} onChange={(shortcut) => setShortcuts((current) => ({ ...current, [selected]: shortcut }))} />}
+          {values[selected] === "keyboardShortcut" && <ShortcutRecorder value={shortcuts[selected] ?? ""} onChange={(shortcut) => { draftRevision.current++; setShortcuts((current) => ({ ...current, [selected]: shortcut })); setSaved(false); }} />}
           <div className="mapping-preview"><span>触发结果</span><strong>{actionLabel}</strong></div>
           {conflict && <p className="inline-warning" role="alert"><AlertTriangle size={16}/>与 {conflict}冲突；实际使用时两个按键都会触发该操作。</p>}
           {saved && <p className="save-confirmation" role="status">映射已保存</p>}

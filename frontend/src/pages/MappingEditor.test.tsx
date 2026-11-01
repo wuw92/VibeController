@@ -27,6 +27,42 @@ function MappingEditor(props: ComponentProps<typeof HostMappingEditor>) {
 afterEach(cleanup);
 
 describe("MappingEditor", () => {
+  it("preserves edits made after submission when a delayed save acknowledgement arrives", () => {
+    const onSave = vi.fn();
+    const onReset = vi.fn();
+    const { rerender } = render(<HostMappingEditor initialValues={{ x: "dictation" }}
+      onSave={onSave} onReset={onReset} />);
+    fireEvent.change(screen.getByLabelText("绑定操作"), { target: { value: "send" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存映射" }));
+    expect(onSave).toHaveBeenLastCalledWith({ x: "send" });
+    fireEvent.change(screen.getByLabelText("绑定操作"), { target: { value: "commandPalette" } });
+
+    rerender(<HostMappingEditor initialValues={{ x: "send" }} onSave={onSave} onReset={onReset} />);
+    expect(screen.getByLabelText("绑定操作")).toHaveValue("commandPalette");
+    fireEvent.click(screen.getByRole("button", { name: "保存映射" }));
+    expect(onSave).toHaveBeenLastCalledWith({ x: "commandPalette" });
+
+    // Reset is authoritative even while a newer save acknowledgement is pending.
+    fireEvent.click(screen.getByRole("button", { name: "恢复默认" }));
+    rerender(<HostMappingEditor initialValues={{ x: "dictation" }} onSave={onSave} onReset={onReset} />);
+    expect(screen.getByLabelText("绑定操作")).toHaveValue("dictation");
+  });
+
+  it("preserves a newer recorded shortcut through an older save acknowledgement", () => {
+    const onSave = vi.fn();
+    const onReset = vi.fn();
+    const { rerender } = render(<HostMappingEditor initialValues={{ x: "shortcut:Ctrl+K" }}
+      onSave={onSave} onReset={onReset} />);
+    fireEvent.keyDown(screen.getByLabelText("自定义快捷键"), { key: "A", ctrlKey: true });
+    fireEvent.click(screen.getByRole("button", { name: "保存映射" }));
+    fireEvent.keyDown(screen.getByLabelText("自定义快捷键"), { key: "B", ctrlKey: true });
+    rerender(<HostMappingEditor initialValues={{ x: "shortcut:Ctrl+A" }}
+      onSave={onSave} onReset={onReset} />);
+    expect(screen.getByLabelText("自定义快捷键")).toHaveValue("Ctrl+B");
+    fireEvent.click(screen.getByRole("button", { name: "保存映射" }));
+    expect(onSave).toHaveBeenLastCalledWith({ x: "shortcut:Ctrl+B" });
+  });
+
   it("does not invent defaults or permit saving before the host configuration arrives", () => {
     const onSave = vi.fn();
     render(<HostMappingEditor onSave={onSave} onReset={vi.fn()} />);

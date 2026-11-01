@@ -41,7 +41,6 @@ The machine-readable contract lives in [the backend payload records](src/VibeCon
 - React coalesces host messages to one update per animation frame. Backend `DefaultProfileFactory` is authoritative for mapping defaults; the editor waits for host configuration and waits for the host's reset response. The dashboard displays current host mappings rather than a second default table.
 - The settings editor synchronizes when persisted values change or first arrive, but diagnostics-only refreshes do not discard unsaved edits.
 - `npm run dev --prefix frontend` without a WebView host displays a disconnected/loading workspace. Add `?demo` to explicitly preview controller feedback; mapping editing remains disabled until host configuration arrives.
-- Configuration formatting and raw-input learning lifecycle helpers live in service partials. Learning save/rollback stays in the service's existing settings-write/runtime-gate orchestration so extraction does not alter cancellation or stale-session handling.
 
 ## Pull requests / Pull Request 要求
 

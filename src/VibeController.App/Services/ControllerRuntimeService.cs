@@ -12,7 +12,7 @@ using VibeController.Infrastructure.Windows;
 
 namespace VibeController.App.Services;
 
-public sealed partial class ControllerRuntimeService : IAsyncDisposable
+public sealed class ControllerRuntimeService : IAsyncDisposable
 {
     private static readonly TimeSpan IntegrationPollInterval = TimeSpan.FromMilliseconds(250);
     private readonly ISettingsStore _settingsStore;
@@ -20,6 +20,14 @@ public sealed partial class ControllerRuntimeService : IAsyncDisposable
     private readonly CodexActivityStore _codexActivityStore;
     private readonly CodexHookInstaller _codexHookInstaller;
     private readonly IRc901aRawInputSource? _rc901aRawInputSource;
+    private readonly object _rc901aLearningGate = new();
+    private readonly Rc901aLearningSession _rc901aLearning = new();
+    private bool _rc901aInputSubscribed;
+    private Rc901aUnknownInputSignal? _lastUnknownRc901aInput;
+    private CancellationTokenSource? _rc901aLearningSaveCancellation;
+    private MappingProfile? _formattedProfile;
+    private IReadOnlyDictionary<string, string> _formattedMappings =
+        new Dictionary<string, string>();
     private readonly CancellationTokenSource _cancellation = new();
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly SemaphoreSlim _settingsWriteGate = new(1, 1);
@@ -875,6 +883,168 @@ public sealed partial class ControllerRuntimeService : IAsyncDisposable
 
         _lightbar.SetLightbarColor(nextColor);
     }
+
+    private RuntimeConfigurationPayload BuildConfiguration()
+    {
+        if (!ReferenceEquals(_formattedProfile, _settings.Profile))
+        {
+            _formattedMappings = _settings.Profile.Mappings.ToDictionary(
+                pair => FormatControl(pair.Key),
+                pair => MappedActionCodec.Format(pair.Value));
+            _formattedProfile = _settings.Profile;
+        }
+
+        return new RuntimeConfigurationPayload(
+            _settings.ControllerType,
+            _settings.ActiveControllerIndex,
+            _settings.CodexOnly,
+            FormatShortcut(_settings.DictationShortcut),
+            _settings.MouseSpeed * 3.5f,
+            _settings.ScrollSpeed * 6.25f,
+            _settings.DeadZone,
+            _settings.StartWithWindows,
+            _formattedMappings,
+            _settings.CodexLightbarEnabled,
+            _microphoneStatus,
+            _codexHookStatus,
+            _codexActivity,
+            _rc901aStatus,
+            BuildRc901aInputStatus());
+    }
+
+    private static bool TryControl(string name, out ControllerControl control)
+    {
+        var normalized = name switch
+        {
+            "leftShoulder" => "LeftBumper",
+            "rightShoulder" => "RightBumper",
+            _ => name,
+        };
+        return Enum.TryParse(normalized, ignoreCase: true, out control);
+    }
+
+    private static KeyboardShortcut ParseShortcut(string text)
+    {
+        var parts = text.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length == 0) return new KeyboardShortcut();
+        var modifiers = parts[..^1].Select(part => part.ToLowerInvariant() switch
+        {
+            "ctrl" or "control" => (KeyModifier?)KeyModifier.Control,
+            "shift" => KeyModifier.Shift,
+            "alt" => KeyModifier.Alt,
+            "win" or "windows" or "meta" => KeyModifier.Windows,
+            _ => null,
+        }).Where(modifier => modifier.HasValue).Select(modifier => modifier!.Value);
+        return new KeyboardShortcut(parts[^1], modifiers);
+    }
+
+    private static string FormatControl(ControllerControl control) => control switch
+    {
+        ControllerControl.LeftBumper => "leftShoulder",
+        ControllerControl.RightBumper => "rightShoulder",
+        _ => char.ToLowerInvariant(control.ToString()[0]) + control.ToString()[1..],
+    };
+
+    private static string FormatShortcut(KeyboardShortcut shortcut) => string.Join(
+        "+",
+        shortcut.Modifiers.Select(modifier => modifier switch
+        {
+            KeyModifier.Control => "Ctrl",
+            KeyModifier.Shift => "Shift",
+            KeyModifier.Alt => "Alt",
+            KeyModifier.Windows => "Win",
+            _ => modifier.ToString(),
+        }).Append(shortcut.Key));
+
+    private void SubscribeToRc901aInput()
+    {
+        if (_rc901aRawInputSource is null || _rc901aInputSubscribed)
+        {
+            return;
+        }
+
+        _rc901aRawInputSource.InputReceived += OnRc901aInputReceived;
+        _rc901aInputSubscribed = true;
+    }
+
+    private void UnsubscribeFromRc901aInput()
+    {
+        if (_rc901aRawInputSource is null || !_rc901aInputSubscribed)
+        {
+            return;
+        }
+
+        _rc901aRawInputSource.InputReceived -= OnRc901aInputReceived;
+        _rc901aInputSubscribed = false;
+    }
+
+    private void OnRc901aInputReceived(Rc901aRawInputEvent input)
+    {
+        var effectiveBindings = GetEffectiveRc901aBindings();
+        var recordUnknown = input.IsPressed && effectiveBindings.All(item =>
+            item.Kind != input.Kind || item.Code != input.Code);
+        bool learningChanged;
+        lock (_rc901aLearningGate)
+        {
+            if (recordUnknown)
+            {
+                _lastUnknownRc901aInput = new Rc901aUnknownInputSignal(
+                    input.Kind, input.Code, input.Timestamp);
+            }
+            learningChanged = _rc901aLearning.ObserveInput(input, effectiveBindings);
+        }
+
+        if (recordUnknown || learningChanged)
+        {
+            Interlocked.Increment(ref _configurationRevision);
+            _stateDirty = true;
+        }
+    }
+
+    private bool ExpireRc901aLearning(DateTimeOffset now)
+    {
+        lock (_rc901aLearningGate)
+        {
+            if (!_rc901aLearning.Expire(now)) return false;
+            _rc901aLearningSaveCancellation?.Cancel();
+        }
+        _stateDirty = true;
+        return true;
+    }
+
+    private bool DisconnectRc901aLearning()
+    {
+        lock (_rc901aLearningGate)
+        {
+            if (!_rc901aLearning.Disconnect()) return false;
+            _rc901aLearningSaveCancellation?.Cancel();
+        }
+        _stateDirty = true;
+        return true;
+    }
+
+    private bool IsRc901aLearningActive()
+    {
+        lock (_rc901aLearningGate)
+        {
+            return _rc901aLearning.IsActive;
+        }
+    }
+
+    private Rc901aInputStatus? BuildRc901aInputStatus()
+    {
+        if (_rc901aRawInputSource is null) return null;
+        lock (_rc901aLearningGate)
+        {
+            return new Rc901aInputStatus(
+                GetEffectiveRc901aBindings(),
+                _lastUnknownRc901aInput,
+                _rc901aLearning.Status);
+        }
+    }
+
+    private IReadOnlyList<Rc901aInputBinding> GetEffectiveRc901aBindings() =>
+        Rc901aInputBindings.CombineWithVerifiedDefaults(_settings.Rc901aLearnedBindings);
 
     public async ValueTask DisposeAsync()
     {

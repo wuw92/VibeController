@@ -31,6 +31,15 @@ Keep device adapters separate from mappings and output injection. A new controll
 
 设备适配层、映射层和输入注入层必须保持分离。新增设备应输出统一的 `ControllerControl` 事件，不要在设备适配器中直接发送键盘或鼠标操作。
 
+### Runtime bridge
+
+- Input processing remains on a 16 ms timer. Mapping edits/reset update the existing runtime profile; only device/backend changes rebuild the adapter.
+- Version 1 `runtimeState` keeps its existing envelope. Input-only payloads omit `configuration`; configuration changes are coalesced to at most one publication every 250 ms. `requestState` and `CurrentStateJson` provide a self-contained replay with configuration.
+- Consumers merge partial configuration fields, retaining configuration when omitted or `null`. A supplied `mappings` dictionary is a **complete profile snapshot**, including reset results, not a dictionary patch. Controls likewise represent the latest snapshot.
+- React coalesces host messages to one update per animation frame. Backend `DefaultProfileFactory` is authoritative for mapping defaults; the editor waits for host configuration and waits for the host's reset response. The dashboard displays current host mappings rather than a second default table.
+- `npm run dev --prefix frontend` without a WebView host displays a disconnected/loading workspace. Add `?demo` to explicitly preview controller feedback; mapping editing remains disabled until host configuration arrives.
+- Configuration formatting and raw-input learning lifecycle helpers live in service partials. Learning save/rollback stays in the service's existing settings-write/runtime-gate orchestration so extraction does not alter cancellation or stale-session handling.
+
 ## Pull requests / Pull Request 要求
 
 1. Explain the user-visible problem and intended behavior.

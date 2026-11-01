@@ -72,7 +72,7 @@ describe("Dashboard", () => {
             scrollSpeed: 50,
             deadZone: 0.12,
             startWithWindows: false,
-            mappings: {},
+            mappings: { touchpadX: "mouseMove" },
           },
         }}
         onToggleMapping={vi.fn()}
@@ -86,8 +86,7 @@ describe("Dashboard", () => {
     );
     expect(screen.getByTestId("control-square")).toHaveAttribute("data-pressed", "true");
     expect(screen.getByTestId("control-touchpad")).toHaveAttribute("data-pressed", "true");
-    expect(screen.getByText("触控板滑动")).toBeInTheDocument();
-    expect(screen.getByText("移动鼠标光标")).toBeInTheDocument();
+    expect(screen.getByText("鼠标：移动")).toBeInTheDocument();
   });
 
   it("shows the real TCL remote with verified Windows HID feedback", () => {
@@ -212,15 +211,10 @@ describe("Dashboard", () => {
     expect(onToggleTestMode).toHaveBeenCalledWith(true);
   });
 
-  it("shows the text-editing and reasoning defaults", () => {
+  it("does not invent shortcut mappings before configuration arrives", () => {
     render(<Dashboard state={connectedState} onToggleMapping={vi.fn()} />);
 
-    expect(screen.getByText("删除上一个字符（Backspace）")).toBeInTheDocument();
-    expect(screen.getByText("B")).toBeInTheDocument();
-    expect(screen.getByText("移动输入光标")).toBeInTheDocument();
-    expect(screen.getByText("右摇杆 ↑ ↓ ← →")).toBeInTheDocument();
-    expect(screen.getByText("降低 / 提高推理强度")).toBeInTheDocument();
-    expect(screen.getByText("方向键 ← →")).toBeInTheDocument();
-    expect(screen.queryByText("切换模型")).not.toBeInTheDocument();
+    expect(screen.getByText("等待主机配置")).toBeInTheDocument();
+    expect(screen.queryByText("删除上一个字符（Backspace）")).not.toBeInTheDocument();
   });
 });

@@ -107,6 +107,52 @@ public sealed class CodexActivityStoreTests : IDisposable
     private CodexActivityStore CreateStore() => new(
         Path.Combine(_directory, "codex-hook-state.json"));
 
+    [Fact]
+    public void ReadStatus_CachedDocumentStillExpiresWithoutFileChanges()
+    {
+        var store = CreateStore();
+        var now = DateTimeOffset.UnixEpoch;
+        Assert.True(store.TryRecordHookEvent(HookJson("session-1", "UserPromptSubmit"), now));
+
+        Assert.Equal(CodexActivityState.Working, store.ReadStatus(now).State);
+        Assert.Equal(CodexActivityState.Completed, store.ReadStatus(now.AddSeconds(16)).State);
+        Assert.Equal(CodexActivityState.Idle, store.ReadStatus(now.AddSeconds(24)).State);
+        Assert.Null(store.ReadStatus(now.AddHours(13)).LastEventAt);
+    }
+
+    [Fact]
+    public void ReadStatus_ObservesReplacementDeletionAndRecreation()
+    {
+        var reader = CreateStore();
+        var writer = CreateStore();
+        var now = DateTimeOffset.UnixEpoch;
+        Assert.True(writer.TryRecordHookEvent(HookJson("session-1", "UserPromptSubmit"), now));
+        Assert.Equal(CodexActivityState.Working, reader.ReadStatus(now).State);
+        Assert.True(writer.TryRecordHookEvent(HookJson("session-2", "PermissionRequest"), now));
+        Assert.Equal(CodexActivityState.NeedsAttention, reader.ReadStatus(now).State);
+
+        File.Delete(Path.Combine(_directory, "codex-hook-state.json"));
+        Assert.Null(reader.ReadStatus(now).LastEventAt);
+        Assert.True(writer.TryRecordHookEvent(HookJson("session-3", "Stop"), now));
+        Assert.Equal(CodexActivityState.Completed, reader.ReadStatus(now).State);
+    }
+
+    [Fact]
+    public void ReadStatus_DoesNotReuseCachedStateForMalformedFile()
+    {
+        var store = CreateStore();
+        var now = DateTimeOffset.UnixEpoch;
+        Assert.True(store.TryRecordHookEvent(HookJson("session-1", "UserPromptSubmit"), now));
+        Assert.Equal(CodexActivityState.Working, store.ReadStatus(now).State);
+
+        File.WriteAllText(Path.Combine(_directory, "codex-hook-state.json"), "{");
+        Assert.Null(store.ReadStatus(now).LastEventAt);
+        Assert.False(store.TryRecordHookEvent(HookJson("session-2", "Stop"), now));
+        File.Delete(Path.Combine(_directory, "codex-hook-state.json"));
+        Assert.True(store.TryRecordHookEvent(HookJson("session-2", "Stop"), now));
+        Assert.Equal(CodexActivityState.Completed, store.ReadStatus(now).State);
+    }
+
     private static string HookJson(string sessionId, string eventName) => $$"""
         {
           "session_id": "{{sessionId}}",

@@ -1,10 +1,59 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { MappingEditor } from "./MappingEditor";
+import type { ComponentProps } from "react";
+import { MappingEditor as HostMappingEditor } from "./MappingEditor";
+
+// Explicit host fixture: production code never supplies these defaults.
+const hostMappings = {
+  x: "dictation", a: "send", b: "shortcut:Backspace", y: "commandPalette",
+  leftShoulder: "previousChat", rightShoulder: "nextChat",
+  dPadLeft: "decreaseReasoning", dPadRight: "increaseReasoning",
+  rightStickLeft: "shortcut:ArrowLeft", rightStickRight: "shortcut:ArrowRight",
+  rightStickUp: "shortcut:ArrowUp", rightStickDown: "shortcut:ArrowDown",
+  touchpadX: "mouseMove", touchpadY: "mouseMove", touchpadButton: "mouseLeftClick",
+  remoteOk: "send", remoteBack: "shortcut:Backspace", remoteHome: "activateCodex",
+  remoteMenu: "commandPalette", remoteMic: "dictation",
+  remoteLeft: "shortcut:ArrowLeft", remoteRight: "shortcut:ArrowRight",
+  remotePower: "none", remoteInput: "none", remoteRed: "none",
+  remoteGreen: "none", remoteBlue: "none", remoteSettings: "none",
+  remoteApp1: "none", remoteApp2: "none", remoteBrightnessUp: "none",
+  remoteBrightnessDown: "none", remotePictureMode: "none",
+};
+
+function MappingEditor(props: ComponentProps<typeof HostMappingEditor>) {
+  return <HostMappingEditor initialValues={hostMappings} {...props} />;
+}
 
 afterEach(cleanup);
 
 describe("MappingEditor", () => {
+  it("does not invent defaults or permit saving before the host configuration arrives", () => {
+    const onSave = vi.fn();
+    render(<HostMappingEditor onSave={onSave} onReset={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "保存映射" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "恢复默认" })).toBeDisabled();
+    expect(screen.getByLabelText("绑定操作")).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "保存映射" }));
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("waits for authoritative reset values and preserves edits through unchanged config refreshes", () => {
+    const onSave = vi.fn();
+    const onReset = vi.fn();
+    const { rerender } = render(<HostMappingEditor
+      initialValues={{ x: "send" }} onSave={onSave} onReset={onReset} />);
+    fireEvent.change(screen.getByLabelText("绑定操作"), { target: { value: "commandPalette" } });
+    rerender(<HostMappingEditor initialValues={{ x: "send" }} onSave={onSave} onReset={onReset} />);
+    expect(screen.getByLabelText("绑定操作")).toHaveValue("commandPalette");
+    fireEvent.click(screen.getByRole("button", { name: "恢复默认" }));
+    expect(screen.getByRole("button", { name: "保存映射" })).toBeDisabled();
+    rerender(<HostMappingEditor initialValues={{ x: "send" }} onSave={onSave} onReset={onReset} />);
+    expect(screen.getByLabelText("绑定操作")).toHaveValue("send");
+    fireEvent.click(screen.getByRole("button", { name: "保存映射" }));
+    expect(onSave).toHaveBeenCalledWith({ x: "send" });
+    expect(onReset).toHaveBeenCalledOnce();
+  });
+
   it("selects a control and changes its action", () => {
     const onSave = vi.fn();
     render(<MappingEditor onSave={onSave} onReset={vi.fn()} />);

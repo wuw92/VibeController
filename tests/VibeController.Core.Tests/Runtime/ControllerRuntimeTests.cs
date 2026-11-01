@@ -8,6 +8,34 @@ namespace VibeController.Core.Tests.Runtime;
 
 public sealed class ControllerRuntimeTests
 {
+    private readonly Xunit.Abstractions.ITestOutputHelper _output;
+
+    public ControllerRuntimeTests(Xunit.Abstractions.ITestOutputHelper output) => _output = output;
+
+    [Theory]
+    [InlineData(0f)]
+    [InlineData(0.6f)]
+    public async Task Tick_SteadyStateAllocationsStayWithinBudget(float stickValue)
+    {
+        using var runtime = CreateRuntime(
+            new ConstantControllerAdapter(ControllerSnapshot.Empty.With(ControllerControl.LeftStickX, stickValue)),
+            new RecordingExecutor());
+        var options = Options with { TestMode = true };
+        for (var tick = 0; tick < 100; tick++)
+        {
+            await runtime.TickAsync(options, DateTimeOffset.UnixEpoch);
+        }
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var tick = 0; tick < 1000; tick++)
+        {
+            await runtime.TickAsync(options, DateTimeOffset.UnixEpoch);
+        }
+        var bytesPerTick = (GC.GetAllocatedBytesForCurrentThread() - before) / 1000;
+        _output.WriteLine($"Stick {stickValue}: {bytesPerTick} allocated bytes/tick");
+        Assert.InRange(bytesPerTick, 1, 1024);
+    }
+
     private static readonly RuntimeOptions Options = new(
         ControllerIndex: 0,
         MappingEnabled: true,
@@ -246,6 +274,72 @@ public sealed class ControllerRuntimeTests
         Assert.True(adapter.IsDisposed);
     }
 
+    [Fact]
+    public async Task UpdateProfile_PreservesConnectionEdgesAndRepeatTiming()
+    {
+        var held = ControllerSnapshot.Empty
+            .With(ControllerControl.A, 1f)
+            .With(ControllerControl.DPadUp, 1f);
+        var adapter = new QueueControllerAdapter(Connected(1, held), Connected(1, held));
+        var executor = new RecordingExecutor();
+        using var runtime = CreateRuntime(adapter, executor);
+        await runtime.TickAsync(Options, DateTimeOffset.UnixEpoch);
+
+        runtime.UpdateProfile(DefaultProfileFactory.Create().WithMappings(
+        [
+            new(ControllerControl.A, new MappedAction(MappedActionKind.Cancel)),
+            new(ControllerControl.DPadUp,
+                new MappedAction(MappedActionKind.KeyboardShortcut, new KeyboardShortcut("ArrowDown"))),
+        ]));
+        var next = await runtime.TickAsync(Options, DateTimeOffset.UnixEpoch.AddMilliseconds(350));
+
+        Assert.False(next.ConnectionChanged);
+        var repeated = Assert.Single(next.InputEvents);
+        Assert.Equal(InputEdge.Repeated, repeated.Edge);
+        Assert.Equal(ControllerControl.DPadUp, repeated.Control);
+        Assert.Equal("ArrowDown", executor.Invocations[^1].Action.Shortcut?.Key);
+        Assert.DoesNotContain(executor.Invocations, item => item.Action.Kind == MappedActionKind.Cancel);
+    }
+
+    [Fact]
+    public void UpdateProfile_DoesNotDisposeAdapter()
+    {
+        var adapter = new DisposableControllerAdapter();
+        using var runtime = CreateRuntime(adapter, new RecordingExecutor());
+        runtime.UpdateProfile(DefaultProfileFactory.Create());
+        Assert.False(adapter.IsDisposed);
+    }
+
+    [Fact]
+    public async Task Tick_TouchpadDeltaIsNotRepeatedOnUnchangedPacket()
+    {
+        var snapshot = ControllerSnapshot.Empty.With(ControllerControl.TouchpadX, 0.4f);
+        using var runtime = CreateRuntime(new ConstantControllerAdapter(snapshot), new RecordingExecutor());
+        var first = await runtime.TickAsync(Options, DateTimeOffset.UnixEpoch);
+        var next = await runtime.TickAsync(Options, DateTimeOffset.UnixEpoch.AddMilliseconds(16));
+
+        Assert.Equal(ControllerControl.TouchpadX, Assert.Single(first.InputEvents).Control);
+        Assert.Empty(next.InputEvents);
+    }
+
+    [Fact]
+    public async Task Tick_RepeatsRetainPressOrder()
+    {
+        var down = ControllerSnapshot.Empty.With(ControllerControl.DPadDown, 1f);
+        var both = down.With(ControllerControl.DPadUp, 1f);
+        using var runtime = CreateRuntime(
+            new QueueControllerAdapter(Connected(1, down), Connected(2, both), Connected(2, both)),
+            new RecordingExecutor());
+        await runtime.TickAsync(Options, DateTimeOffset.UnixEpoch);
+        await runtime.TickAsync(Options, DateTimeOffset.UnixEpoch.AddMilliseconds(10));
+        var repeated = await runtime.TickAsync(Options, DateTimeOffset.UnixEpoch.AddMilliseconds(360));
+
+        Assert.Equal(
+            new[] { ControllerControl.DPadDown, ControllerControl.DPadUp },
+            repeated.InputEvents.Select(item => item.Control));
+        Assert.All(repeated.InputEvents, item => Assert.Equal(InputEdge.Repeated, item.Edge));
+    }
+
     private static ControllerRuntime CreateRuntime(
         IControllerAdapter adapter,
         IActionExecutor executor)
@@ -282,6 +376,12 @@ public sealed class ControllerRuntimeTests
             float deadZone) => ControllerReadResult.Disconnected(controllerIndex);
 
         public void Dispose() => IsDisposed = true;
+    }
+
+    private sealed class ConstantControllerAdapter(ControllerSnapshot snapshot) : IControllerAdapter
+    {
+        public ControllerReadResult Read(int controllerIndex, ControllerSnapshot previous, float deadZone) =>
+            Connected(1, snapshot);
     }
 
     private sealed class AlwaysCodexForeground : IForegroundAppService

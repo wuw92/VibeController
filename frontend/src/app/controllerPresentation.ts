@@ -9,11 +9,6 @@ export interface ControllerControlPresentation {
   keycap: string;
 }
 
-export interface DefaultActionPresentation {
-  action: string;
-  keycap: string;
-}
-
 export interface ControllerPresentation {
   name: string;
   statusName: string;
@@ -21,7 +16,6 @@ export interface ControllerPresentation {
   waitingName: string;
   subtitle: string;
   controls: readonly ControllerControlPresentation[];
-  defaultActions: readonly DefaultActionPresentation[];
 }
 
 const commonDirectionalControls: readonly ControllerControlPresentation[] = [
@@ -42,7 +36,7 @@ const xbox: ControllerPresentation = {
   statusName: "Xbox 手柄",
   connectedLabel: "Xbox 手柄已连接",
   waitingName: "Xbox 手柄",
-  subtitle: "用 Xbox 手柄控制 Codex。按 X 听写，按 A 发送，保持思路不断线。",
+  subtitle: "用 Xbox 手柄控制 Codex，保持思路不断线。",
   controls: [
     { key: "x", label: "X 按键", keycap: "X" },
     { key: "a", label: "A 按键", keycap: "A" },
@@ -58,16 +52,6 @@ const xbox: ControllerPresentation = {
     { key: "leftStickButton", label: "L3", keycap: "L3" },
     { key: "rightStickButton", label: "R3", keycap: "R3" },
   ],
-  defaultActions: [
-    { action: "切换听写快捷键", keycap: "X" },
-    { action: "发送消息", keycap: "A" },
-    { action: "删除上一个字符（Backspace）", keycap: "B" },
-    { action: "打开命令菜单", keycap: "Y" },
-    { action: "上一个任务", keycap: "LB" },
-    { action: "下一项任务", keycap: "RB" },
-    { action: "降低 / 提高推理强度", keycap: "方向键 ← →" },
-    { action: "移动输入光标", keycap: "右摇杆 ↑ ↓ ← →" },
-  ],
 };
 
 const playStation5: ControllerPresentation = {
@@ -75,7 +59,7 @@ const playStation5: ControllerPresentation = {
   statusName: "PS5 DualSense",
   connectedLabel: "PS5 DualSense 已连接",
   waitingName: "PS5 DualSense",
-  subtitle: "用 PS5 DualSense 控制 Codex。按方块听写，按叉发送，触控板直接移动鼠标。",
+  subtitle: "用 PS5 DualSense 控制 Codex，支持触控板输入。",
   controls: [
     { key: "x", label: "□ 方块键", keycap: "□" },
     { key: "a", label: "× 叉键", keycap: "×" },
@@ -93,18 +77,6 @@ const playStation5: ControllerPresentation = {
     { key: "touchpadX", label: "触控板横向滑动", keycap: "触控 ↔" },
     { key: "touchpadY", label: "触控板纵向滑动", keycap: "触控 ↕" },
     { key: "touchpadButton", label: "触控板按下", keycap: "触控按下" },
-  ],
-  defaultActions: [
-    { action: "切换听写快捷键", keycap: "□" },
-    { action: "发送消息", keycap: "×" },
-    { action: "删除上一个字符（Backspace）", keycap: "○" },
-    { action: "打开命令菜单", keycap: "△" },
-    { action: "上一个任务", keycap: "L1" },
-    { action: "下一项任务", keycap: "R1" },
-    { action: "降低 / 提高推理强度", keycap: "方向键 ← →" },
-    { action: "移动输入光标", keycap: "右摇杆 ↑ ↓ ← →" },
-    { action: "触控板滑动", keycap: "移动鼠标光标" },
-    { action: "触控板按下", keycap: "鼠标左键单击" },
   ],
 };
 
@@ -138,15 +110,6 @@ const tclRc901a: ControllerPresentation = {
     { key: "remoteBrightnessUp", label: "亮度 +", keycap: "☀+" },
     { key: "remoteBrightnessDown", label: "亮度 −", keycap: "☀−" },
     { key: "remotePictureMode", label: "图像模式", keycap: "PIC" },
-  ],
-  defaultActions: [
-    { action: "Windows HID 模式", keycap: "RC901A" },
-    { action: "切换听写快捷键", keycap: "MIC" },
-    { action: "发送消息", keycap: "OK" },
-    { action: "删除上一个字符（Backspace）", keycap: "↩" },
-    { action: "激活 Codex 窗口", keycap: "⌂" },
-    { action: "打开命令菜单", keycap: "☰" },
-    { action: "移动输入光标", keycap: "方向键" },
   ],
 };
 

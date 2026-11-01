@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Battery, Bluetooth, Clipboard, Gamepad2, Lightbulb, Mic2, Radio, RefreshCw, Save, Trash2 } from "lucide-react";
 import { SliderField } from "../components/SliderField";
 import { Rc901aLearningPanel } from "../components/Rc901aLearningPanel";
@@ -89,6 +89,12 @@ export function Settings({
   rc901aInput,
 }: SettingsProps) {
   const [values, setValues] = useState<SettingsValues>(initialValues ?? defaultSettings);
+  const serializedInitialValues = initialValues ? JSON.stringify(initialValues) : null;
+  useEffect(() => {
+    if (serializedInitialValues !== null) {
+      setValues(JSON.parse(serializedInitialValues) as SettingsValues);
+    }
+  }, [serializedInitialValues]);
   const update = <K extends keyof SettingsValues>(key: K, value: SettingsValues[K]) =>
     setValues((current) => ({ ...current, [key]: value }));
   const microphoneName = microphone?.defaultDeviceName ?? (

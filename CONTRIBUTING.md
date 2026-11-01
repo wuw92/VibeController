@@ -33,10 +33,13 @@ Keep device adapters separate from mappings and output injection. A new controll
 
 ### Runtime bridge
 
+The machine-readable contract lives in [the backend payload records](src/VibeController.Core/Runtime/BridgeMessage.cs) and [the frontend bridge types](frontend/src/app/types.ts); [serialization regressions](tests/VibeController.Core.Tests/Runtime/BridgeMessageTests.cs) verify its wire representation. Consult [DefaultProfileFactory](src/VibeController.Core/Mapping/DefaultProfileFactory.cs) for the current default mapping set rather than maintaining another binding list here.
+
 - Input processing remains on a 16 ms timer. Mapping edits/reset update the existing runtime profile; only device/backend changes rebuild the adapter.
 - Version 1 `runtimeState` keeps its existing envelope. Input-only payloads omit `configuration`; configuration changes are coalesced to at most one publication every 250 ms. `requestState` and `CurrentStateJson` provide a self-contained replay with configuration.
 - Consumers merge partial configuration fields, retaining configuration when omitted or `null`. A supplied `mappings` dictionary is a **complete profile snapshot**, including reset results, not a dictionary patch. Controls likewise represent the latest snapshot.
 - React coalesces host messages to one update per animation frame. Backend `DefaultProfileFactory` is authoritative for mapping defaults; the editor waits for host configuration and waits for the host's reset response. The dashboard displays current host mappings rather than a second default table.
+- The settings editor synchronizes when persisted values change or first arrive, but diagnostics-only refreshes do not discard unsaved edits.
 - `npm run dev --prefix frontend` without a WebView host displays a disconnected/loading workspace. Add `?demo` to explicitly preview controller feedback; mapping editing remains disabled until host configuration arrives.
 - Configuration formatting and raw-input learning lifecycle helpers live in service partials. Learning save/rollback stays in the service's existing settings-write/runtime-gate orchestration so extraction does not alter cancellation or stale-session handling.
 

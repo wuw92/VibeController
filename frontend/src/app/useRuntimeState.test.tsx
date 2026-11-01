@@ -65,6 +65,17 @@ describe("useRuntimeState", () => {
     expect(result.current[0].packetNumber).toBe(99);
     expect(result.current[0].configuration).toEqual({ ...configuration, mouseSpeed: 70 });
     expect(result.current[0].controls).toEqual({ x: 1 });
+    act(() => {
+      receive({ version: 1, type: "runtimeState",
+        payload: { configuration: { mappings: { a: "send" } } } });
+      receive({ version: 1, type: "runtimeState",
+        payload: { packetNumber: 100, controls: { x: 0 } } });
+      flush(0);
+    });
+    expect(result.current[0].configuration).toEqual({
+      ...configuration, mouseSpeed: 70, mappings: { a: "send" },
+    });
+    expect(result.current[0].configuration?.mappings).not.toHaveProperty("x");
   });
 
   it("cancels a queued frame and unsubscribes on unmount", () => {

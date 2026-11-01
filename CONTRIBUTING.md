@@ -31,6 +31,17 @@ Keep device adapters separate from mappings and output injection. A new controll
 
 设备适配层、映射层和输入注入层必须保持分离。新增设备应输出统一的 `ControllerControl` 事件，不要在设备适配器中直接发送键盘或鼠标操作。
 
+### Runtime bridge
+
+The machine-readable contract lives in [the backend payload records](src/VibeController.Core/Runtime/BridgeMessage.cs) and [the frontend bridge types](frontend/src/app/types.ts); [serialization regressions](tests/VibeController.Core.Tests/Runtime/BridgeMessageTests.cs) verify its wire representation. Consult [DefaultProfileFactory](src/VibeController.Core/Mapping/DefaultProfileFactory.cs) for the current default mapping set rather than maintaining another binding list here.
+
+- Input processing retains its existing cadence. Mapping edits/reset update the existing runtime profile; only device/backend changes rebuild the adapter. See [the runtime service](src/VibeController.App/Services/ControllerRuntimeService.cs) for polling and publication intervals.
+- `runtimeState` keeps its existing envelope. Input-only payloads omit `configuration`; configuration changes are coalesced independently of input processing. `requestState` and `CurrentStateJson` provide a self-contained replay with configuration.
+- Consumers merge partial configuration fields, retaining configuration when omitted or `null`. A supplied `mappings` dictionary is a **complete profile snapshot**, including reset results, not a dictionary patch. Controls likewise represent the latest snapshot.
+- React coalesces host messages to one update per animation frame. Backend `DefaultProfileFactory` is authoritative for mapping defaults; the editor waits for host configuration and waits for the host's reset response. The dashboard displays current host mappings rather than a second default table.
+- The settings editor synchronizes when persisted values change or first arrive, but diagnostics-only refreshes do not discard unsaved edits.
+- `npm run dev --prefix frontend` without a WebView host displays a disconnected/loading workspace. Add `?demo` to explicitly preview controller feedback; mapping editing remains disabled until host configuration arrives.
+
 ## Pull requests / Pull Request 要求
 
 1. Explain the user-visible problem and intended behavior.

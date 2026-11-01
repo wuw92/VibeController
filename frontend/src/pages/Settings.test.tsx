@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Rc901aControl, Rc901aInputStatus } from "../app/types";
-import { Settings } from "./Settings";
+import { Settings, type SettingsValues } from "./Settings";
 
 afterEach(cleanup);
 
@@ -49,6 +49,69 @@ const verifiedRc901aInput: Rc901aInputStatus = {
 };
 
 describe("Settings", () => {
+  it("preserves slider edits after saving a controller selection through delayed acknowledgement", () => {
+    const onSave = vi.fn();
+    const onCopyDiagnostics = vi.fn();
+    const persisted: SettingsValues = {
+      controllerType: "xbox", codexOnly: true, startWithWindows: false,
+      deadZone: 0.25, mouseSpeed: 73, scrollSpeed: 37, activeControllerIndex: 2,
+      dictationShortcut: "Ctrl+K", codexLightbarEnabled: false,
+    };
+    const { rerender } = render(<Settings initialValues={persisted}
+      onSave={onSave} onCopyDiagnostics={onCopyDiagnostics} />);
+    fireEvent.click(screen.getByLabelText("PS5 DualSense"));
+    fireEvent.click(screen.getByLabelText("登录 Windows 后自动启动"));
+    fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
+    const submitted = { ...persisted, controllerType: "playStation5", startWithWindows: true };
+    expect(onSave).toHaveBeenLastCalledWith(submitted);
+
+    // App retains the old controller type until the host confirms it.
+    rerender(<Settings initialValues={{ ...persisted, startWithWindows: true }}
+      onSave={onSave} onCopyDiagnostics={onCopyDiagnostics} />);
+    expect(screen.getByLabelText("PS5 DualSense")).toBeChecked();
+    fireEvent.change(screen.getByLabelText("鼠标速度"), { target: { value: "91" } });
+    rerender(<Settings initialValues={{ ...submitted, controllerType: "playStation5" }}
+      onSave={onSave} onCopyDiagnostics={onCopyDiagnostics} />);
+    expect(screen.getByLabelText("鼠标速度")).toHaveValue("91");
+    expect(screen.getByLabelText("PS5 DualSense")).toBeChecked();
+
+    rerender(<Settings initialValues={{ ...submitted, controllerType: "playStation5" }}
+      onSave={onSave} onCopyDiagnostics={onCopyDiagnostics}
+      codexActivity={{ state: "working", lastEventAt: null, activeSessionCount: 1 }} />);
+    expect(screen.getByLabelText("鼠标速度")).toHaveValue("91");
+    fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
+    expect(onSave).toHaveBeenLastCalledWith({ ...submitted, mouseSpeed: 91 });
+  });
+
+  it("loads persisted settings arriving after mount and preserves edits through diagnostics refreshes", () => {
+    const onSave = vi.fn();
+    const onCopyDiagnostics = vi.fn();
+    const persisted: SettingsValues = {
+      controllerType: "playStation5", codexOnly: false, startWithWindows: true,
+      deadZone: 0.25, mouseSpeed: 73, scrollSpeed: 37, activeControllerIndex: 2,
+      dictationShortcut: "Ctrl+K", codexLightbarEnabled: true,
+    };
+    const { rerender } = render(<Settings onSave={onSave} onCopyDiagnostics={onCopyDiagnostics} />);
+    rerender(<Settings initialValues={persisted} onSave={onSave} onCopyDiagnostics={onCopyDiagnostics} />);
+    expect(screen.getByLabelText("PS5 DualSense")).toBeChecked();
+    expect(screen.getByLabelText("仅在 Codex 前台时执行")).not.toBeChecked();
+    expect(screen.getByLabelText("鼠标速度")).toHaveValue("73");
+
+    fireEvent.click(screen.getByLabelText("Xbox 无线手柄"));
+    rerender(<Settings initialValues={{ ...persisted }} onSave={onSave} onCopyDiagnostics={onCopyDiagnostics}
+      codexActivity={{ state: "working", lastEventAt: null, activeSessionCount: 1 }} />);
+    expect(screen.getByLabelText("Xbox 无线手柄")).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
+    expect(onSave).toHaveBeenCalledWith({ ...persisted, controllerType: "xbox" });
+    rerender(<Settings initialValues={{ ...persisted, controllerType: "xbox" }}
+      onSave={onSave} onCopyDiagnostics={onCopyDiagnostics} />);
+
+    rerender(<Settings initialValues={{ ...persisted, mouseSpeed: 81 }}
+      onSave={onSave} onCopyDiagnostics={onCopyDiagnostics} />);
+    expect(screen.getByLabelText("PS5 DualSense")).toBeChecked();
+    expect(screen.getByLabelText("鼠标速度")).toHaveValue("81");
+  });
+
   it("explains that Codex shortcuts are read automatically instead of exposing a duplicate setting", () => {
     render(<Settings onSave={vi.fn()} onCopyDiagnostics={vi.fn()} />);
 

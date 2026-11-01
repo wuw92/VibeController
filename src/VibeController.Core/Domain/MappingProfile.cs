@@ -25,5 +25,8 @@ public sealed record MappingProfile
         Mappings.TryGetValue(control, out action!);
 
     public MappingProfile WithMapping(ControllerControl control, MappedAction action) =>
-        new(Name, Mappings.SetItem(control, action));
+        this with { Mappings = Mappings.SetItem(control, action) };
+
+    public MappingProfile WithMappings(IEnumerable<KeyValuePair<ControllerControl, MappedAction>> mappings) =>
+        this with { Mappings = Mappings.SetItems(mappings) };
 }

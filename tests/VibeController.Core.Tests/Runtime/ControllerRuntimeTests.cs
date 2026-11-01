@@ -246,6 +246,70 @@ public sealed class ControllerRuntimeTests
         Assert.True(adapter.IsDisposed);
     }
 
+    [Fact]
+    public async Task UpdateProfile_PreservesConnectionEdgesAndRepeatTiming()
+    {
+        var held = ControllerSnapshot.Empty
+            .With(ControllerControl.A, 1f)
+            .With(ControllerControl.DPadUp, 1f);
+        var adapter = new QueueControllerAdapter(Connected(1, held), Connected(1, held));
+        var executor = new RecordingExecutor();
+        using var runtime = CreateRuntime(adapter, executor);
+        await runtime.TickAsync(Options, DateTimeOffset.UnixEpoch);
+
+        var original = DefaultProfileFactory.Create();
+        var updated = original.WithMappings(
+        [
+            new(ControllerControl.A, new MappedAction(MappedActionKind.Cancel)),
+            new(ControllerControl.DPadUp,
+                new MappedAction(MappedActionKind.KeyboardShortcut, new KeyboardShortcut("ArrowDown"))),
+        ]);
+        Assert.Equal(MappedActionKind.Send, original.Mappings[ControllerControl.A].Kind);
+        Assert.Equal("ArrowUp", original.Mappings[ControllerControl.DPadUp].Shortcut?.Key);
+        Assert.Equal(original.Mappings[ControllerControl.X], updated.Mappings[ControllerControl.X]);
+        runtime.UpdateProfile(updated);
+        var next = await runtime.TickAsync(Options, DateTimeOffset.UnixEpoch.AddMilliseconds(350));
+
+        Assert.False(next.ConnectionChanged);
+        var repeated = Assert.Single(next.InputEvents);
+        Assert.Equal(InputEdge.Repeated, repeated.Edge);
+        Assert.Equal(ControllerControl.DPadUp, repeated.Control);
+        Assert.Equal("ArrowDown", executor.Invocations[^1].Action.Shortcut?.Key);
+        Assert.DoesNotContain(executor.Invocations, item => item.Action.Kind == MappedActionKind.Cancel);
+    }
+
+    [Fact]
+    public async Task Tick_TouchpadDeltaIsNotRepeatedOnUnchangedPacket()
+    {
+        var snapshot = ControllerSnapshot.Empty.With(ControllerControl.TouchpadX, 0.4f);
+        using var runtime = CreateRuntime(
+            new QueueControllerAdapter(Connected(1, snapshot), Connected(1, snapshot)),
+            new RecordingExecutor());
+        var first = await runtime.TickAsync(Options, DateTimeOffset.UnixEpoch);
+        var next = await runtime.TickAsync(Options, DateTimeOffset.UnixEpoch.AddMilliseconds(16));
+
+        Assert.Equal(ControllerControl.TouchpadX, Assert.Single(first.InputEvents).Control);
+        Assert.Empty(next.InputEvents);
+    }
+
+    [Fact]
+    public async Task Tick_RepeatsRetainPressOrder()
+    {
+        var down = ControllerSnapshot.Empty.With(ControllerControl.DPadDown, 1f);
+        var both = down.With(ControllerControl.DPadUp, 1f);
+        using var runtime = CreateRuntime(
+            new QueueControllerAdapter(Connected(1, down), Connected(2, both), Connected(2, both)),
+            new RecordingExecutor());
+        await runtime.TickAsync(Options, DateTimeOffset.UnixEpoch);
+        await runtime.TickAsync(Options, DateTimeOffset.UnixEpoch.AddMilliseconds(10));
+        var repeated = await runtime.TickAsync(Options, DateTimeOffset.UnixEpoch.AddMilliseconds(360));
+
+        Assert.Equal(
+            new[] { ControllerControl.DPadDown, ControllerControl.DPadUp },
+            repeated.InputEvents.Select(item => item.Control));
+        Assert.All(repeated.InputEvents, item => Assert.Equal(InputEdge.Repeated, item.Edge));
+    }
+
     private static ControllerRuntime CreateRuntime(
         IControllerAdapter adapter,
         IActionExecutor executor)

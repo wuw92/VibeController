@@ -15,6 +15,7 @@ public sealed record RuntimeStatePayload(
     uint PacketNumber,
     IReadOnlyDictionary<string, float> Controls,
     string? LastAction,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     RuntimeConfigurationPayload? Configuration = null);
 
 public sealed record RuntimeConfigurationPayload(

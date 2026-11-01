@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Battery, Bluetooth, Clipboard, Gamepad2, Lightbulb, Mic2, Radio, RefreshCw, Save, Trash2 } from "lucide-react";
 import { SliderField } from "../components/SliderField";
 import { Rc901aLearningPanel } from "../components/Rc901aLearningPanel";
@@ -61,6 +61,11 @@ const defaultSettings: SettingsValues = {
   codexLightbarEnabled: false,
 };
 
+function serializeSettings(values: SettingsValues) {
+  return JSON.stringify(Object.fromEntries(Object.entries(values)
+    .sort(([left], [right]) => left.localeCompare(right))));
+}
+
 const activityLabels = {
   idle: "空闲",
   working: "工作中",
@@ -89,8 +94,37 @@ export function Settings({
   rc901aInput,
 }: SettingsProps) {
   const [values, setValues] = useState<SettingsValues>(initialValues ?? defaultSettings);
-  const update = <K extends keyof SettingsValues>(key: K, value: SettingsValues[K]) =>
+  const draftRevision = useRef(0);
+  const submissions = useRef<{ snapshot: string; revision: number }[]>([]);
+  const lastIncoming = useRef<string | undefined>(undefined);
+  const serializedInitialValues = initialValues ? serializeSettings(initialValues) : null;
+  useEffect(() => {
+    if (serializedInitialValues === null) return;
+    const acknowledgedIndex = submissions.current
+      .map((submission) => submission.snapshot).lastIndexOf(serializedInitialValues);
+    if (acknowledgedIndex >= 0) {
+      const acknowledged = submissions.current[acknowledgedIndex];
+      submissions.current.splice(0, acknowledgedIndex + 1);
+      if (draftRevision.current > acknowledged.revision) {
+        lastIncoming.current = serializedInitialValues;
+        return;
+      }
+    } else if (submissions.current.length > 0) {
+      // App may optimistically publish other saved fields before controller selection is acknowledged.
+      return;
+    }
+    if (lastIncoming.current === serializedInitialValues) return;
+    lastIncoming.current = serializedInitialValues;
+    setValues(JSON.parse(serializedInitialValues) as SettingsValues);
+  }, [serializedInitialValues, initialValues]);
+  const update = <K extends keyof SettingsValues>(key: K, value: SettingsValues[K]) => {
+    draftRevision.current++;
     setValues((current) => ({ ...current, [key]: value }));
+  };
+  const saveSettings = () => {
+    submissions.current.push({ snapshot: serializeSettings(values), revision: draftRevision.current });
+    onSave(values);
+  };
   const microphoneName = microphone?.defaultDeviceName ?? (
     microphone?.state === "noDevices" ? "未检测到录音设备" : "等待检测"
   );
@@ -304,7 +338,7 @@ export function Settings({
       </div>
 
       <footer className="settings-footer">
-        <button className="primary-button" type="button" onClick={() => onSave(values)}><Save size={15} />保存设置</button>
+        <button className="primary-button" type="button" onClick={saveSettings}><Save size={15} />保存设置</button>
       </footer>
     </main>
   );

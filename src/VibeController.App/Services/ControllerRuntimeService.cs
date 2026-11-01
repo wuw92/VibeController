@@ -22,6 +22,12 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
     private readonly IRc901aRawInputSource? _rc901aRawInputSource;
     private readonly object _rc901aLearningGate = new();
     private readonly Rc901aLearningSession _rc901aLearning = new();
+    private bool _rc901aInputSubscribed;
+    private Rc901aUnknownInputSignal? _lastUnknownRc901aInput;
+    private CancellationTokenSource? _rc901aLearningSaveCancellation;
+    private MappingProfile? _formattedProfile;
+    private IReadOnlyDictionary<string, string> _formattedMappings =
+        new Dictionary<string, string>();
     private readonly CancellationTokenSource _cancellation = new();
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly SemaphoreSlim _settingsWriteGate = new(1, 1);
@@ -32,11 +38,14 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
     private Task? _loop;
     private bool _testMode;
     private string? _lastJson;
+    private string? _lastRuntimeJson;
+    private RuntimeStatePayload? _lastPayload;
+    private RuntimeConfigurationPayload? _lastConfiguration;
+    private DateTimeOffset _nextConfigurationPublish = DateTimeOffset.MinValue;
     private bool _stateDirty = true;
+    private long _configurationRevision;
+    private long _publishedConfigurationRevision;
     private DateTimeOffset _nextIntegrationPoll = DateTimeOffset.MinValue;
-    private bool _rc901aInputSubscribed;
-    private Rc901aUnknownInputSignal? _lastUnknownRc901aInput;
-    private CancellationTokenSource? _rc901aLearningSaveCancellation;
     private CodexActivityLightbarAnimation _lightbarAnimation = new();
     private MicrophoneStatus _microphoneStatus = new(
         MicrophoneDetectionState.Error,
@@ -73,7 +82,7 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
             "hooks.json"));
     }
 
-    public string? CurrentStateJson => _lastJson;
+    public string? CurrentStateJson => _lastJson ??= SerializeReplay();
 
     public Task ToggleMappingAsync() => HandleCommandAsync(JsonSerializer.Serialize(new
     {
@@ -144,7 +153,7 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
                     case "resetDefaults":
                         _settings = _settings with { Profile = DefaultProfileFactory.Create() };
                         _stateDirty = true;
-                        RebuildRuntime();
+                        _runtime?.UpdateProfile(_settings.Profile);
                         await _settingsStore.SaveAsync(_settings, _cancellation.Token);
                         break;
                     case "requestState":
@@ -200,11 +209,18 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
 
     public void PublishCurrent()
     {
-        if (_lastJson is not null)
+        if (_lastPayload is not null)
         {
-            StateJsonReady?.Invoke(_lastJson);
+            // Explicit replay must be self-contained even after input-only messages.
+            _lastConfiguration = BuildConfiguration();
+            _lastJson = SerializeReplay();
+            StateJsonReady?.Invoke(_lastJson!);
         }
     }
+
+    private string? SerializeReplay() => _lastPayload is null ? null :
+        BridgeJson.Serialize(new BridgeMessage<RuntimeStatePayload>(
+            1, "runtimeState", _lastPayload with { Configuration = _lastConfiguration }));
 
     private async Task RunLoopAsync(CancellationToken cancellationToken)
     {
@@ -232,21 +248,7 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
                 }
                 var integrationChanged = PollCodexActivity(timestamp);
                 ApplyLightbarColor(timestamp);
-                if (!_stateDirty &&
-                    !integrationChanged &&
-                    !result.ConnectionChanged &&
-                    result.InputEvents.Count == 0)
-                {
-                    continue;
-                }
-                var lastAction = DescribeLastAction(result, _settings.ControllerType);
-                var json = BridgeJson.Serialize(BridgeMessageFactory.RuntimeState(result.State, lastAction, BuildConfiguration()));
-                if (!string.Equals(json, _lastJson, StringComparison.Ordinal))
-                {
-                    _lastJson = json;
-                    StateJsonReady?.Invoke(json);
-                }
-                _stateDirty = false;
+                PublishRuntimeState(result, timestamp, integrationChanged);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -260,6 +262,44 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
             {
                 _gate.Release();
             }
+        }
+    }
+
+    private void PublishRuntimeState(
+        RuntimeTickResult result,
+        DateTimeOffset timestamp,
+        bool integrationChanged)
+    {
+        var configurationRevision = Interlocked.Read(ref _configurationRevision);
+        var publishConfiguration = _lastConfiguration is null ||
+            ((_stateDirty || integrationChanged ||
+              configurationRevision != _publishedConfigurationRevision) &&
+             timestamp >= _nextConfigurationPublish);
+        if (integrationChanged) _stateDirty = true;
+        if (!publishConfiguration &&
+            !result.ConnectionChanged &&
+            result.InputEvents.Count == 0)
+        {
+            return;
+        }
+        if (publishConfiguration)
+        {
+            _lastConfiguration = BuildConfiguration();
+            _publishedConfigurationRevision = configurationRevision;
+            _nextConfigurationPublish = timestamp.Add(IntegrationPollInterval);
+            _stateDirty = false;
+        }
+        var message = BridgeMessageFactory.RuntimeState(
+            result.State,
+            DescribeLastAction(result, _settings.ControllerType),
+            publishConfiguration ? _lastConfiguration : null);
+        var json = BridgeJson.Serialize(message);
+        if (publishConfiguration || !string.Equals(json, _lastRuntimeJson, StringComparison.Ordinal))
+        {
+            _lastRuntimeJson = json;
+            _lastPayload = message.Payload;
+            _lastJson = null;
+            StateJsonReady?.Invoke(json);
         }
     }
 
@@ -315,6 +355,7 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
     private void OnRc901aStatusChanged(Rc901aStatus status)
     {
         _rc901aStatus = status;
+        Interlocked.Increment(ref _configurationRevision);
         _stateDirty = true;
         if (status.ConnectionState is not (
                 Rc901aConnectionState.Connected or
@@ -322,57 +363,6 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
             DisconnectRc901aLearning())
         {
             _rc901aAdapter?.ResetInputState();
-        }
-    }
-
-    private void SubscribeToRc901aInput()
-    {
-        if (_rc901aRawInputSource is null || _rc901aInputSubscribed)
-        {
-            return;
-        }
-
-        _rc901aRawInputSource.InputReceived += OnRc901aInputReceived;
-        _rc901aInputSubscribed = true;
-    }
-
-    private void UnsubscribeFromRc901aInput()
-    {
-        if (_rc901aRawInputSource is null || !_rc901aInputSubscribed)
-        {
-            return;
-        }
-
-        _rc901aRawInputSource.InputReceived -= OnRc901aInputReceived;
-        _rc901aInputSubscribed = false;
-    }
-
-    private void OnRc901aInputReceived(Rc901aRawInputEvent input)
-    {
-        var effectiveBindings = GetEffectiveRc901aBindings();
-        var isUnknown = effectiveBindings.All(item =>
-            item.Kind != input.Kind ||
-            item.Code != input.Code);
-        var recordUnknown = isUnknown && input.IsPressed;
-        var learningChanged = false;
-        lock (_rc901aLearningGate)
-        {
-            if (recordUnknown)
-            {
-                _lastUnknownRc901aInput = new Rc901aUnknownInputSignal(
-                    input.Kind,
-                    input.Code,
-                    input.Timestamp);
-            }
-
-            learningChanged = _rc901aLearning.ObserveInput(
-                input,
-                effectiveBindings);
-        }
-
-        if (recordUnknown || learningChanged)
-        {
-            _stateDirty = true;
         }
     }
 
@@ -644,36 +634,6 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
         _stateDirty = true;
     }
 
-    private bool ExpireRc901aLearning(DateTimeOffset now)
-    {
-        lock (_rc901aLearningGate)
-        {
-            if (!_rc901aLearning.Expire(now))
-            {
-                return false;
-            }
-            _rc901aLearningSaveCancellation?.Cancel();
-        }
-
-        _stateDirty = true;
-        return true;
-    }
-
-    private bool DisconnectRc901aLearning()
-    {
-        lock (_rc901aLearningGate)
-        {
-            if (!_rc901aLearning.Disconnect())
-            {
-                return false;
-            }
-            _rc901aLearningSaveCancellation?.Cancel();
-        }
-
-        _stateDirty = true;
-        return true;
-    }
-
     private Task RestoreRc901aSettingsAsync(AppSettings settings) =>
         _settingsStore.SaveAsync(settings, _cancellation.Token);
 
@@ -691,35 +651,6 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
         }
         saveCancellation.Dispose();
     }
-
-    private bool IsRc901aLearningActive()
-    {
-        lock (_rc901aLearningGate)
-        {
-            return _rc901aLearning.IsActive;
-        }
-    }
-
-    private Rc901aInputStatus? BuildRc901aInputStatus()
-    {
-        if (_rc901aRawInputSource is null)
-        {
-            return null;
-        }
-
-        lock (_rc901aLearningGate)
-        {
-            return new Rc901aInputStatus(
-                GetEffectiveRc901aBindings(),
-                _lastUnknownRc901aInput,
-                _rc901aLearning.Status);
-        }
-    }
-
-    private IReadOnlyList<Rc901aInputBinding>
-        GetEffectiveRc901aBindings() =>
-        Rc901aInputBindings.CombineWithVerifiedDefaults(
-            _settings.Rc901aLearnedBindings);
 
     private static bool TryGetControl(
         JsonElement payload,
@@ -809,45 +740,19 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
 
     private async Task UpdateMappingAsync(JsonElement payload)
     {
-        var profile = _settings.Profile;
+        var mappings = new List<KeyValuePair<ControllerControl, MappedAction>>();
         foreach (var property in payload.EnumerateObject())
         {
             if (TryControl(property.Name, out var control) &&
                 MappedActionCodec.TryParse(property.Value.GetString(), out var action))
             {
-                profile = profile.WithMapping(control, action);
+                mappings.Add(new(control, action));
             }
         }
-        _settings = _settings with { Profile = profile };
+        _settings = _settings with { Profile = _settings.Profile.WithMappings(mappings) };
         _stateDirty = true;
-        RebuildRuntime();
+        _runtime?.UpdateProfile(_settings.Profile);
         await _settingsStore.SaveAsync(_settings, _cancellation.Token);
-    }
-
-    private static bool TryControl(string name, out ControllerControl control)
-    {
-        var normalized = name switch
-        {
-            "leftShoulder" => "LeftBumper",
-            "rightShoulder" => "RightBumper",
-            _ => name,
-        };
-        return Enum.TryParse(normalized, ignoreCase: true, out control);
-    }
-
-    private static KeyboardShortcut ParseShortcut(string text)
-    {
-        var parts = text.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (parts.Length == 0) return new KeyboardShortcut();
-        var modifiers = parts[..^1].Select(part => part.ToLowerInvariant() switch
-        {
-            "ctrl" or "control" => (KeyModifier?)KeyModifier.Control,
-            "shift" => KeyModifier.Shift,
-            "alt" => KeyModifier.Alt,
-            "win" or "windows" or "meta" => KeyModifier.Windows,
-            _ => null,
-        }).Where(modifier => modifier.HasValue).Select(modifier => modifier!.Value);
-        return new KeyboardShortcut(parts[^1], modifiers);
     }
 
     private static string? DescribeLastAction(
@@ -910,25 +815,6 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
         ControllerControl.RightStickDown => "右摇杆下 → ↓（ArrowDown）",
         _ => $"{control} → 已触发",
     };
-
-    private RuntimeConfigurationPayload BuildConfiguration() => new(
-        _settings.ControllerType,
-        _settings.ActiveControllerIndex,
-        _settings.CodexOnly,
-        FormatShortcut(_settings.DictationShortcut),
-        _settings.MouseSpeed * 3.5f,
-        _settings.ScrollSpeed * 6.25f,
-        _settings.DeadZone,
-        _settings.StartWithWindows,
-        _settings.Profile.Mappings.ToDictionary(
-            pair => FormatControl(pair.Key),
-            pair => MappedActionCodec.Format(pair.Value)),
-        _settings.CodexLightbarEnabled,
-        _microphoneStatus,
-        _codexHookStatus,
-        _codexActivity,
-        _rc901aStatus,
-        BuildRc901aInputStatus());
 
     private void RefreshIntegrations()
     {
@@ -998,6 +884,60 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
         _lightbar.SetLightbarColor(nextColor);
     }
 
+    private RuntimeConfigurationPayload BuildConfiguration()
+    {
+        if (!ReferenceEquals(_formattedProfile, _settings.Profile))
+        {
+            _formattedMappings = _settings.Profile.Mappings.ToDictionary(
+                pair => FormatControl(pair.Key),
+                pair => MappedActionCodec.Format(pair.Value));
+            _formattedProfile = _settings.Profile;
+        }
+
+        return new RuntimeConfigurationPayload(
+            _settings.ControllerType,
+            _settings.ActiveControllerIndex,
+            _settings.CodexOnly,
+            FormatShortcut(_settings.DictationShortcut),
+            _settings.MouseSpeed * 3.5f,
+            _settings.ScrollSpeed * 6.25f,
+            _settings.DeadZone,
+            _settings.StartWithWindows,
+            _formattedMappings,
+            _settings.CodexLightbarEnabled,
+            _microphoneStatus,
+            _codexHookStatus,
+            _codexActivity,
+            _rc901aStatus,
+            BuildRc901aInputStatus());
+    }
+
+    private static bool TryControl(string name, out ControllerControl control)
+    {
+        var normalized = name switch
+        {
+            "leftShoulder" => "LeftBumper",
+            "rightShoulder" => "RightBumper",
+            _ => name,
+        };
+        return Enum.TryParse(normalized, ignoreCase: true, out control);
+    }
+
+    private static KeyboardShortcut ParseShortcut(string text)
+    {
+        var parts = text.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length == 0) return new KeyboardShortcut();
+        var modifiers = parts[..^1].Select(part => part.ToLowerInvariant() switch
+        {
+            "ctrl" or "control" => (KeyModifier?)KeyModifier.Control,
+            "shift" => KeyModifier.Shift,
+            "alt" => KeyModifier.Alt,
+            "win" or "windows" or "meta" => KeyModifier.Windows,
+            _ => null,
+        }).Where(modifier => modifier.HasValue).Select(modifier => modifier!.Value);
+        return new KeyboardShortcut(parts[^1], modifiers);
+    }
+
     private static string FormatControl(ControllerControl control) => control switch
     {
         ControllerControl.LeftBumper => "leftShoulder",
@@ -1015,6 +955,96 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
             KeyModifier.Windows => "Win",
             _ => modifier.ToString(),
         }).Append(shortcut.Key));
+
+    private void SubscribeToRc901aInput()
+    {
+        if (_rc901aRawInputSource is null || _rc901aInputSubscribed)
+        {
+            return;
+        }
+
+        _rc901aRawInputSource.InputReceived += OnRc901aInputReceived;
+        _rc901aInputSubscribed = true;
+    }
+
+    private void UnsubscribeFromRc901aInput()
+    {
+        if (_rc901aRawInputSource is null || !_rc901aInputSubscribed)
+        {
+            return;
+        }
+
+        _rc901aRawInputSource.InputReceived -= OnRc901aInputReceived;
+        _rc901aInputSubscribed = false;
+    }
+
+    private void OnRc901aInputReceived(Rc901aRawInputEvent input)
+    {
+        var effectiveBindings = GetEffectiveRc901aBindings();
+        var recordUnknown = input.IsPressed && effectiveBindings.All(item =>
+            item.Kind != input.Kind || item.Code != input.Code);
+        bool learningChanged;
+        lock (_rc901aLearningGate)
+        {
+            if (recordUnknown)
+            {
+                _lastUnknownRc901aInput = new Rc901aUnknownInputSignal(
+                    input.Kind, input.Code, input.Timestamp);
+            }
+            learningChanged = _rc901aLearning.ObserveInput(input, effectiveBindings);
+        }
+
+        if (recordUnknown || learningChanged)
+        {
+            Interlocked.Increment(ref _configurationRevision);
+            _stateDirty = true;
+        }
+    }
+
+    private bool ExpireRc901aLearning(DateTimeOffset now)
+    {
+        lock (_rc901aLearningGate)
+        {
+            if (!_rc901aLearning.Expire(now)) return false;
+            _rc901aLearningSaveCancellation?.Cancel();
+        }
+        _stateDirty = true;
+        return true;
+    }
+
+    private bool DisconnectRc901aLearning()
+    {
+        lock (_rc901aLearningGate)
+        {
+            if (!_rc901aLearning.Disconnect()) return false;
+            _rc901aLearningSaveCancellation?.Cancel();
+        }
+        _stateDirty = true;
+        return true;
+    }
+
+    private bool IsRc901aLearningActive()
+    {
+        lock (_rc901aLearningGate)
+        {
+            return _rc901aLearning.IsActive;
+        }
+    }
+
+    private Rc901aInputStatus? BuildRc901aInputStatus()
+    {
+        if (_rc901aRawInputSource is null) return null;
+        lock (_rc901aLearningGate)
+        {
+            return new Rc901aInputStatus(
+                GetEffectiveRc901aBindings(),
+                _lastUnknownRc901aInput,
+                _rc901aLearning.Status);
+        }
+    }
+
+    private IReadOnlyList<Rc901aInputBinding> GetEffectiveRc901aBindings() =>
+        Rc901aInputBindings.CombineWithVerifiedDefaults(_settings.Rc901aLearnedBindings);
 
     public async ValueTask DisposeAsync()
     {

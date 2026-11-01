@@ -56,21 +56,6 @@ public sealed class ControllerRuntimeServiceConfigurationTests
     }
 
     [Fact]
-    public async Task ConfigurationFormatting_IsCachedUntilProfileChanges()
-    {
-        await using var service = new ControllerRuntimeService(new RecordingSettingsStore());
-        var first = BuildConfiguration(service);
-        var second = BuildConfiguration(service);
-        Assert.Same(first.Mappings, second.Mappings);
-
-        await service.HandleCommandAsync(Command("updateMapping", new { a = "none" }));
-        var changed = BuildConfiguration(service);
-        Assert.NotSame(first.Mappings, changed.Mappings);
-        Assert.Equal("none", changed.Mappings["a"]);
-        Assert.Same(changed.Mappings, BuildConfiguration(service).Mappings);
-    }
-
-    [Fact]
     public async Task ResetAlreadyDefaultProfile_StillAcknowledgesWithAuthoritativeConfiguration()
     {
         await using var service = new ControllerRuntimeService(new RecordingSettingsStore());

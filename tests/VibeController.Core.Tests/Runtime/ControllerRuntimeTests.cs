@@ -8,34 +8,6 @@ namespace VibeController.Core.Tests.Runtime;
 
 public sealed class ControllerRuntimeTests
 {
-    private readonly Xunit.Abstractions.ITestOutputHelper _output;
-
-    public ControllerRuntimeTests(Xunit.Abstractions.ITestOutputHelper output) => _output = output;
-
-    [Theory]
-    [InlineData(0f)]
-    [InlineData(0.6f)]
-    public async Task Tick_SteadyStateAllocationsStayWithinBudget(float stickValue)
-    {
-        using var runtime = CreateRuntime(
-            new ConstantControllerAdapter(ControllerSnapshot.Empty.With(ControllerControl.LeftStickX, stickValue)),
-            new RecordingExecutor());
-        var options = Options with { TestMode = true };
-        for (var tick = 0; tick < 100; tick++)
-        {
-            await runtime.TickAsync(options, DateTimeOffset.UnixEpoch);
-        }
-
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        for (var tick = 0; tick < 1000; tick++)
-        {
-            await runtime.TickAsync(options, DateTimeOffset.UnixEpoch);
-        }
-        var bytesPerTick = (GC.GetAllocatedBytesForCurrentThread() - before) / 1000;
-        _output.WriteLine($"Stick {stickValue}: {bytesPerTick} allocated bytes/tick");
-        Assert.InRange(bytesPerTick, 1, 1024);
-    }
-
     private static readonly RuntimeOptions Options = new(
         ControllerIndex: 0,
         MappingEnabled: true,

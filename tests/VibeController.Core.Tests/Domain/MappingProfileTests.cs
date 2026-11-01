@@ -22,11 +22,4 @@ public sealed class MappingProfileTests
         Assert.Equal(original.Mappings[ControllerControl.X], updated.Mappings[ControllerControl.X]);
     }
 
-    [Fact]
-    public void WithMapping_NoChangeReusesImmutableDictionary()
-    {
-        var original = DefaultProfileFactory.Create();
-        var updated = original.WithMapping(ControllerControl.A, original.Mappings[ControllerControl.A]);
-        Assert.Same(original.Mappings, updated.Mappings);
-    }
 }

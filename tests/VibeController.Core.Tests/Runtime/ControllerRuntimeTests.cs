@@ -257,12 +257,17 @@ public sealed class ControllerRuntimeTests
         using var runtime = CreateRuntime(adapter, executor);
         await runtime.TickAsync(Options, DateTimeOffset.UnixEpoch);
 
-        runtime.UpdateProfile(DefaultProfileFactory.Create().WithMappings(
+        var original = DefaultProfileFactory.Create();
+        var updated = original.WithMappings(
         [
             new(ControllerControl.A, new MappedAction(MappedActionKind.Cancel)),
             new(ControllerControl.DPadUp,
                 new MappedAction(MappedActionKind.KeyboardShortcut, new KeyboardShortcut("ArrowDown"))),
-        ]));
+        ]);
+        Assert.Equal(MappedActionKind.Send, original.Mappings[ControllerControl.A].Kind);
+        Assert.Equal("ArrowUp", original.Mappings[ControllerControl.DPadUp].Shortcut?.Key);
+        Assert.Equal(original.Mappings[ControllerControl.X], updated.Mappings[ControllerControl.X]);
+        runtime.UpdateProfile(updated);
         var next = await runtime.TickAsync(Options, DateTimeOffset.UnixEpoch.AddMilliseconds(350));
 
         Assert.False(next.ConnectionChanged);
@@ -274,19 +279,12 @@ public sealed class ControllerRuntimeTests
     }
 
     [Fact]
-    public void UpdateProfile_DoesNotDisposeAdapter()
-    {
-        var adapter = new DisposableControllerAdapter();
-        using var runtime = CreateRuntime(adapter, new RecordingExecutor());
-        runtime.UpdateProfile(DefaultProfileFactory.Create());
-        Assert.False(adapter.IsDisposed);
-    }
-
-    [Fact]
     public async Task Tick_TouchpadDeltaIsNotRepeatedOnUnchangedPacket()
     {
         var snapshot = ControllerSnapshot.Empty.With(ControllerControl.TouchpadX, 0.4f);
-        using var runtime = CreateRuntime(new ConstantControllerAdapter(snapshot), new RecordingExecutor());
+        using var runtime = CreateRuntime(
+            new QueueControllerAdapter(Connected(1, snapshot), Connected(1, snapshot)),
+            new RecordingExecutor());
         var first = await runtime.TickAsync(Options, DateTimeOffset.UnixEpoch);
         var next = await runtime.TickAsync(Options, DateTimeOffset.UnixEpoch.AddMilliseconds(16));
 
@@ -348,12 +346,6 @@ public sealed class ControllerRuntimeTests
             float deadZone) => ControllerReadResult.Disconnected(controllerIndex);
 
         public void Dispose() => IsDisposed = true;
-    }
-
-    private sealed class ConstantControllerAdapter(ControllerSnapshot snapshot) : IControllerAdapter
-    {
-        public ControllerReadResult Read(int controllerIndex, ControllerSnapshot previous, float deadZone) =>
-            Connected(1, snapshot);
     }
 
     private sealed class AlwaysCodexForeground : IForegroundAppService

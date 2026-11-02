@@ -9,7 +9,7 @@ const bridge = vi.hoisted(() => ({
 
 vi.mock("./AppBridge", () => ({ appBridge: bridge }));
 
-import { initialRuntimeState, mergeRuntimeUpdate, useRuntimeState } from "./useRuntimeState";
+import { initialRuntimeState, useRuntimeState } from "./useRuntimeState";
 
 const configuration: RuntimeConfiguration = {
   controllerType: "playStation5", activeControllerIndex: 2,
@@ -32,19 +32,6 @@ describe("useRuntimeState", () => {
     );
   });
 
-  it("preserves configuration through partial updates and legacy null configuration", () => {
-    const full = { ...initialRuntimeState, configuration };
-    const partial = mergeRuntimeUpdate(full, {
-      packetNumber: 10, configuration: { codexOnly: false },
-    });
-    const hot = mergeRuntimeUpdate(partial, { packetNumber: 11, configuration: null });
-    expect(hot.configuration).toEqual({ ...configuration, codexOnly: false });
-    expect(hot.packetNumber).toBe(11);
-    // Mappings are a complete profile snapshot, not a dictionary patch.
-    expect(mergeRuntimeUpdate(hot, { configuration: { mappings: {} } })
-      .configuration?.mappings).toEqual({});
-  });
-
   it("coalesces a burst into one frame without dropping earlier configuration changes", () => {
     let flush: FrameRequestCallback = () => {};
     const requestFrame = vi.spyOn(window, "requestAnimationFrame")
@@ -57,7 +44,7 @@ describe("useRuntimeState", () => {
       receive({ version: 1, type: "runtimeState",
         payload: { configuration: { mouseSpeed: 70 } } });
       receive({ version: 1, type: "runtimeState",
-        payload: { packetNumber: 99, controls: { x: 1 } } });
+        payload: { packetNumber: 99, controls: { x: 1 }, configuration: null } });
     });
     expect(requestFrame).toHaveBeenCalledOnce();
     expect(result.current[0].packetNumber).toBe(0);
@@ -76,6 +63,11 @@ describe("useRuntimeState", () => {
       ...configuration, mouseSpeed: 70, mappings: { a: "send" },
     });
     expect(result.current[0].configuration?.mappings).not.toHaveProperty("x");
+    act(() => {
+      receive({ version: 1, type: "runtimeState", payload: { configuration: { mappings: {} } } });
+      flush(0);
+    });
+    expect(result.current[0].configuration?.mappings).toEqual({});
   });
 
   it("cancels a queued frame and unsubscribes on unmount", () => {

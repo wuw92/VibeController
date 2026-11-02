@@ -72,7 +72,7 @@ public sealed class ControllerRuntimeServiceConfigurationTests
     }
 
     [Fact]
-    public async Task RuntimePublication_OmitsHotPathConfigurationAndEventuallyFlushesDirtyConfiguration()
+    public async Task RuntimePublication_OmitsHotConfigurationButReplaysAndFlushesPendingChanges()
     {
         await using var service = new ControllerRuntimeService(new RecordingSettingsStore());
         var messages = new List<string>();
@@ -90,42 +90,24 @@ public sealed class ControllerRuntimeServiceConfigurationTests
         {
             Assert.False(hot.RootElement.GetProperty("payload").TryGetProperty("configuration", out _));
         }
+        using (var replay = JsonDocument.Parse(service.CurrentStateJson!))
+        {
+            Assert.Equal(2u, replay.RootElement.GetProperty("payload").GetProperty("packetNumber").GetUInt32());
+            Assert.True(replay.RootElement.GetProperty("payload").TryGetProperty("configuration", out _));
+        }
         // A pending configuration change must flush even when input has stopped.
         PublishTick(service, now.AddMilliseconds(250), 2);
         Assert.Equal(3, messages.Count);
         using var configuration = JsonDocument.Parse(messages[2]);
         Assert.Equal("none", configuration.RootElement.GetProperty("payload")
             .GetProperty("configuration").GetProperty("mappings").GetProperty("x").GetString());
-    }
-
-    [Fact]
-    public async Task RequestState_ReplaysFullConfigurationAfterAnInputOnlyPayload()
-    {
-        await using var service = new ControllerRuntimeService(new RecordingSettingsStore());
-        var payload = new RuntimeStatePayload(
-            "connected", 0, true, false, 55,
-            new Dictionary<string, float> { ["x"] = 1 }, null);
-        SetField(service, "_lastPayload", payload);
-        SetField(service, "_lastConfiguration", BuildConfiguration(service));
-
-        AssertFullReplay(service.CurrentStateJson!);
-        await service.HandleCommandAsync(Command("updateMapping", new { x = "none" }));
-        string? replay = null;
-        service.StateJsonReady += json => replay = json;
+        PublishTick(service, now.AddMilliseconds(266), 3, hasInput: true);
+        await service.HandleCommandAsync(Command("updateMapping", new { x = "send" }));
         await service.HandleCommandAsync(Command("requestState", new { }));
-        AssertFullReplay(replay!);
-        using var document = JsonDocument.Parse(replay!);
-        Assert.Equal("none", document.RootElement.GetProperty("payload")
+        using var document = JsonDocument.Parse(messages[^1]);
+        Assert.Equal(3u, document.RootElement.GetProperty("payload").GetProperty("packetNumber").GetUInt32());
+        Assert.Equal("send", document.RootElement.GetProperty("payload")
             .GetProperty("configuration").GetProperty("mappings").GetProperty("x").GetString());
-    }
-
-    private static void AssertFullReplay(string json)
-    {
-        using var document = JsonDocument.Parse(json);
-        var payload = document.RootElement.GetProperty("payload");
-        Assert.Equal(55u, payload.GetProperty("packetNumber").GetUInt32());
-        Assert.True(payload.GetProperty("configuration").GetProperty("mappings")
-            .EnumerateObject().Any());
     }
 
     private static string Command(string type, object payload) =>

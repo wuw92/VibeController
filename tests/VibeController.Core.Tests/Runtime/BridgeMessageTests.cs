@@ -269,5 +269,7 @@ public sealed class BridgeMessageTests
         Assert.Equal(1f, payload.GetProperty("controls").GetProperty("x").GetSingle());
         Assert.Equal(0.25f, payload.GetProperty("controls").GetProperty("leftStickX").GetSingle());
         Assert.Equal("X → 切换听写快捷键", payload.GetProperty("lastAction").GetString());
+        Assert.False(payload.TryGetProperty("configuration", out _));
+        Assert.False(payload.TryGetProperty("mappings", out _));
     }
 }

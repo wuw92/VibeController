@@ -39,7 +39,7 @@ public sealed class ControllerRuntime : IDisposable
 {
     private readonly IControllerAdapter _adapter;
     private readonly ActionDispatcher _dispatcher;
-    private readonly MappingEngine _mappingEngine;
+    private MappingEngine _mappingEngine;
     private readonly RightStickGestureDetector _rightStickGestures = new();
     private ControllerConnectionState _connectionState = ControllerConnectionState.Unknown;
     private ControllerSnapshot _previousSnapshot = ControllerSnapshot.Empty;
@@ -47,21 +47,6 @@ public sealed class ControllerRuntime : IDisposable
     private bool _hasPacket;
     private bool _disposed;
     private readonly Dictionary<ControllerControl, RepeatState> _repeatStates = [];
-    private static readonly ControllerControl[] RepeatableControls =
-    [
-        ControllerControl.DPadUp,
-        ControllerControl.DPadDown,
-        ControllerControl.DPadLeft,
-        ControllerControl.DPadRight,
-        ControllerControl.RightStickUp,
-        ControllerControl.RightStickDown,
-        ControllerControl.RightStickLeft,
-        ControllerControl.RightStickRight,
-        ControllerControl.RemoteUp,
-        ControllerControl.RemoteDown,
-        ControllerControl.RemoteLeft,
-        ControllerControl.RemoteRight,
-    ];
     private static readonly ControllerControl[] ContinuousControls =
     [
         ControllerControl.LeftStickX,
@@ -118,14 +103,7 @@ public sealed class ControllerRuntime : IDisposable
             _hasPacket = true;
         }
 
-        var changedControls = inputEvents
-            .Where(item => item.Edge == InputEdge.Changed)
-            .Select(item => item.Control)
-            .ToHashSet();
-        inputEvents.AddRange(DetectHeldContinuousInput(
-            read.Snapshot,
-            timestamp,
-            changedControls));
+        AddHeldContinuousInput(read.Snapshot, timestamp, inputEvents);
 
         var rightStickGesture = _rightStickGestures.Detect(read.Snapshot, timestamp);
         if (rightStickGesture is not null)
@@ -133,7 +111,7 @@ public sealed class ControllerRuntime : IDisposable
             inputEvents.Add(rightStickGesture);
         }
         UpdateRepeatStates(inputEvents, timestamp);
-        inputEvents.AddRange(DetectRepeats(options, timestamp));
+        AddRepeats(options, timestamp, inputEvents);
 
         if (inputEvents.Count == 0)
         {
@@ -160,13 +138,14 @@ public sealed class ControllerRuntime : IDisposable
         return Result(options, read, connectionChanged, inputEvents, dispatchResults);
     }
 
-    private void UpdateRepeatStates(IEnumerable<InputEvent> inputEvents, DateTimeOffset timestamp)
+    private void UpdateRepeatStates(List<InputEvent> inputEvents, DateTimeOffset timestamp)
     {
-        foreach (var inputEvent in inputEvents.Where(item => RepeatableControls.Contains(item.Control)))
+        foreach (var inputEvent in inputEvents)
         {
+            if (!ControllerInputRules.IsRepeatable(inputEvent.Control)) continue;
             if (inputEvent.Edge == InputEdge.Pressed)
             {
-                _repeatStates[inputEvent.Control] = new RepeatState(timestamp, null);
+                _repeatStates[inputEvent.Control] = new RepeatState(timestamp);
             }
             else if (inputEvent.Edge == InputEdge.Released)
             {
@@ -175,31 +154,49 @@ public sealed class ControllerRuntime : IDisposable
         }
     }
 
-    private IReadOnlyList<InputEvent> DetectRepeats(RuntimeOptions options, DateTimeOffset timestamp)
+    private void AddRepeats(RuntimeOptions options, DateTimeOffset timestamp, List<InputEvent> inputEvents)
     {
-        var repeats = new List<InputEvent>();
-        foreach (var (control, state) in _repeatStates.ToArray())
+        foreach (var (control, state) in _repeatStates)
         {
             var due = state.LastRepeat is null
                 ? state.PressedAt.AddMilliseconds(options.RepeatDelayMilliseconds)
                 : state.LastRepeat.Value.AddMilliseconds(options.RepeatIntervalMilliseconds);
             if (timestamp < due) continue;
-            repeats.Add(new InputEvent(control, InputEdge.Repeated, 1f, timestamp));
-            _repeatStates[control] = state with { LastRepeat = timestamp };
+            inputEvents.Add(new InputEvent(control, InputEdge.Repeated, 1f, timestamp));
+            state.LastRepeat = timestamp;
         }
-        return repeats;
     }
 
-    private static IReadOnlyList<InputEvent> DetectHeldContinuousInput(
+    private static void AddHeldContinuousInput(
         ControllerSnapshot snapshot,
         DateTimeOffset timestamp,
-        IReadOnlySet<ControllerControl> alreadyEmitted) => ContinuousControls
-        .Select(control => (Control: control, Value: snapshot.GetValue(control)))
-        .Where(item =>
-            !alreadyEmitted.Contains(item.Control) &&
-            MathF.Abs(item.Value) > 0.001f)
-        .Select(item => new InputEvent(item.Control, InputEdge.Changed, item.Value, timestamp))
-        .ToArray();
+        List<InputEvent> inputEvents)
+    {
+        foreach (var control in ContinuousControls)
+        {
+            var value = snapshot.GetValue(control);
+            if (!(MathF.Abs(value) > 0.001f)) continue;
+            var alreadyEmitted = false;
+            foreach (var inputEvent in inputEvents)
+            {
+                if (inputEvent.Control == control && inputEvent.Edge == InputEdge.Changed)
+                {
+                    alreadyEmitted = true;
+                    break;
+                }
+            }
+            if (!alreadyEmitted)
+            {
+                inputEvents.Add(new InputEvent(control, InputEdge.Changed, value, timestamp));
+            }
+        }
+    }
+
+    public void UpdateProfile(MappingProfile profile)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        _mappingEngine = new MappingEngine(profile);
+    }
 
     private RuntimeTickResult Result(
         RuntimeOptions options,
@@ -232,5 +229,9 @@ public sealed class ControllerRuntime : IDisposable
         }
     }
 
-    private sealed record RepeatState(DateTimeOffset PressedAt, DateTimeOffset? LastRepeat);
+    private sealed class RepeatState(DateTimeOffset pressedAt)
+    {
+        public DateTimeOffset PressedAt { get; } = pressedAt;
+        public DateTimeOffset? LastRepeat { get; set; }
+    }
 }

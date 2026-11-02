@@ -6,22 +6,6 @@ public sealed record ActionInvocation(MappedAction Action, InputEvent Input);
 
 public sealed class MappingEngine
 {
-    private static readonly HashSet<ControllerControl> RepeatableControls =
-    [
-        ControllerControl.DPadUp,
-        ControllerControl.DPadDown,
-        ControllerControl.DPadLeft,
-        ControllerControl.DPadRight,
-        ControllerControl.RightStickUp,
-        ControllerControl.RightStickDown,
-        ControllerControl.RightStickLeft,
-        ControllerControl.RightStickRight,
-        ControllerControl.RemoteUp,
-        ControllerControl.RemoteDown,
-        ControllerControl.RemoteLeft,
-        ControllerControl.RemoteRight,
-    ];
-
     private static readonly HashSet<ControllerControl> ContinuousControls =
     [
         ControllerControl.LeftStickX,
@@ -52,7 +36,7 @@ public sealed class MappingEngine
         {
             InputEdge.Pressed => !ContinuousControls.Contains(input.Control),
             InputEdge.Repeated =>
-                RepeatableControls.Contains(input.Control) &&
+                ControllerInputRules.IsRepeatable(input.Control) &&
                 IsRepeatableAction(action.Kind),
             InputEdge.Changed => ContinuousControls.Contains(input.Control),
             _ => false,

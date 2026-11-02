@@ -19,6 +19,9 @@ public sealed class CodexActivityStore
     };
 
     private readonly string _statePath;
+    private readonly object _cacheGate = new();
+    private PersistedDocument? _cachedDocument;
+    private (DateTime LastWrite, DateTime Created, long Length) _cachedStamp;
 
     public CodexActivityStore(string statePath)
     {
@@ -76,7 +79,7 @@ public sealed class CodexActivityStore
     {
         try
         {
-            var sessions = LoadDocument().Sessions.Values
+            var sessions = LoadCachedDocument().Sessions.Values
                 .Where(session => timestamp - session.UpdatedAt <= SessionLifetime)
                 .ToArray();
             var visibleSessions = sessions.Select(session =>
@@ -166,6 +169,36 @@ public sealed class CodexActivityStore
                ?? new PersistedDocument();
     }
 
+    private PersistedDocument LoadCachedDocument()
+    {
+        lock (_cacheGate)
+        {
+            var file = new FileInfo(_statePath);
+            if (!file.Exists)
+            {
+                _cachedDocument = null;
+                return new PersistedDocument();
+            }
+
+            var stamp = (file.LastWriteTimeUtc, file.CreationTimeUtc, file.Length);
+            if (_cachedDocument is not null && stamp == _cachedStamp)
+            {
+                return _cachedDocument;
+            }
+
+            _cachedDocument = null;
+            var document = LoadDocument();
+            file.Refresh();
+            if (file.Exists &&
+                stamp == (file.LastWriteTimeUtc, file.CreationTimeUtc, file.Length))
+            {
+                _cachedDocument = document;
+                _cachedStamp = stamp;
+            }
+            return document;
+        }
+    }
+
     private void SaveDocument(PersistedDocument document)
     {
         var directory = Path.GetDirectoryName(_statePath);
@@ -182,6 +215,10 @@ public sealed class CodexActivityStore
                 JsonSerializer.Serialize(document, JsonOptions),
                 new System.Text.UTF8Encoding(false));
             File.Move(temporaryPath, _statePath, overwrite: true);
+            lock (_cacheGate)
+            {
+                _cachedDocument = null;
+            }
         }
         finally
         {

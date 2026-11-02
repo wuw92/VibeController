@@ -156,8 +156,12 @@ export interface RuntimeConfiguration {
 export interface RuntimeStateMessage {
   version: 1;
   type: "runtimeState";
-  payload: RuntimeStatePayload;
+  payload: RuntimeStateUpdate;
 }
+
+export type RuntimeStateUpdate = Partial<Omit<RuntimeStatePayload, "configuration">> & {
+  configuration?: Partial<RuntimeConfiguration> | null;
+};
 
 export type HostMessage = RuntimeStateMessage;
 

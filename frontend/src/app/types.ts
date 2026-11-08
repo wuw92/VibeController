@@ -140,7 +140,17 @@ export interface RuntimeStatePayload {
   packetNumber: number;
   controls: Record<string, number>;
   lastAction: string | null;
+  recentAction?: RecentActionInfo | null;
   configuration?: RuntimeConfiguration;
+}
+
+export interface RecentActionInfo {
+  control: string;
+  action: string | null;
+  status: "dispatched" | "blocked" | "failed" | "test" | "paused" | "unmapped";
+  message: string | null;
+  agent: AgentTarget;
+  controllerType: ControllerType;
 }
 
 export interface RuntimeConfiguration {
@@ -156,6 +166,7 @@ export interface RuntimeConfiguration {
   mappings: Record<string, string>;
   agentMappings?: Record<AgentTarget, Record<string, string>>;
   activeAgent?: AgentTarget;
+  foregroundAgent?: AgentTarget | null;
   agentShortcuts?: Record<AgentTarget, AgentShortcutOption[]>;
   codexLightbarEnabled?: boolean;
   microphone?: MicrophoneStatus;

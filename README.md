@@ -68,6 +68,8 @@ Windows 可能为该遥控器显示“驱动程序错误”。已确认这是 Wi
 
 两个 Agent 使用相同的配置流程：下拉菜单只选择操作名称，当前生效的快捷键及默认、自定义或固定来源单独显示。启动时读取应用设置，配置变化后自动同步，无需手动刷新。修改后立即应用，后台合并保存；正常操作不显示保存流程，只有真实异常才提示。关闭应用时会完成待写入的设置。
 
+连续轴采用固定的移动、滚动和不执行选项，具体规则见 [MappingEngine](src/VibeController.Core/Mapping/MappingEngine.cs)。状态页区分可执行、等待目标应用、测试和暂停，最近记录来自实际输入及派发结果。重置可以作用于当前按键或所选 Agent 的全部映射，并提供一次撤销；重复绑定作为说明，不视为禁止使用的冲突。
+
 常用操作与键位读取见 [CodexShortcutResolver](src/VibeController.Infrastructure/Windows/CodexShortcutResolver.cs)、[DeepSeekShortcutResolver](src/VibeController.Infrastructure/Windows/DeepSeekShortcutResolver.cs)；DSH 命令目录以 [DeepSeekShortcutCatalog](src/VibeController.Infrastructure/Windows/DeepSeekShortcutCatalog.cs) 为准。手柄默认映射见 [DefaultProfileFactory](src/VibeController.Core/Mapping/DefaultProfileFactory.cs)，前台识别见 [窗口服务](src/VibeController.Infrastructure/Windows/CodexWindowService.cs)。既有映射保留。
 
 ### Codex 快捷键自动同步

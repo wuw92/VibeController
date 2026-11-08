@@ -20,6 +20,7 @@ export default function App() {
   }), []);
   const revision = useRef(0);
   const latest = useRef<Record<string, number>>({});
+  const [resetUndo, setResetUndo] = useState<{ agent: AgentTarget; mappings: MappingValues } | null>(null);
 
   const applyConfiguration = async (context: string, type: CommandType, payload: unknown) => {
     const previous = state.configuration;
@@ -33,15 +34,18 @@ export default function App() {
       if (latest.current[context] === current)
         setSaveStatus((status) => ({ ...status, [context]: result.succeeded
           ? { state: "idle" } : { state: "error", error: result.error ?? "请重试" } }));
+      return result.succeeded;
     } catch (error) {
       if (current === revision.current && previous)
         setState((state) => ({ ...state, configuration: previous }));
       if (latest.current[context] === current)
         setSaveStatus((status) => ({ ...status, [context]: { state: "error", error: String(error) } }));
+      return false;
     }
   };
 
   const changeMapping = (agent: AgentTarget, mappings: MappingValues) => {
+    setResetUndo((undo) => undo?.agent === agent ? null : undo);
     setState((state) => ({ ...state, configuration: state.configuration ? {
       ...state.configuration,
       revision: Number.POSITIVE_INFINITY,
@@ -49,6 +53,13 @@ export default function App() {
       mappings: (state.configuration.activeAgent ?? "codex") === agent ? mappings : state.configuration.mappings,
     } : undefined }));
     void applyConfiguration(agent, "updateMapping", { agent, mappings });
+  };
+
+  const resetMapping = async (agent: AgentTarget, control?: string) => {
+    const previous = state.configuration?.agentMappings?.[agent];
+    const request = revision.current + 1;
+    const succeeded = await applyConfiguration(agent, "resetDefaults", { agent, ...(control ? { control } : {}) });
+    if (succeeded && previous && latest.current[agent] === request) setResetUndo({ agent, mappings: previous });
   };
 
   const changeSettings = (settings: SettingsValues) => {
@@ -71,13 +82,15 @@ export default function App() {
   return (
     <AppShell page={page} onNavigate={setPage}>
       {persistenceError && <p className="configuration-persistence-error" role="alert">更改已生效，但未能自动保存：{persistenceError}</p>}
-      {page === "dashboard" && <Dashboard state={state} onToggleMapping={toggleMapping} onToggleTestMode={toggleTestMode} />}
+      {page === "dashboard" && <Dashboard state={state} onToggleMapping={toggleMapping} onToggleTestMode={toggleTestMode} onOpenMappings={() => setPage("mapping")} />}
       {page === "mapping" && (
         <AgentMappingEditor
           configuration={state.configuration}
           saveStatus={saveStatus}
           onSave={changeMapping}
-          onReset={(agent) => { void applyConfiguration(agent, "resetDefaults", { agent }); }}
+          onReset={(agent, control) => { void resetMapping(agent, control); }}
+          undoResetAgent={resetUndo?.agent}
+          onUndoReset={resetUndo ? () => changeMapping(resetUndo.agent, resetUndo.mappings) : undefined}
         />
       )}
       {page === "settings" && (

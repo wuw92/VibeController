@@ -27,7 +27,7 @@ it("saves and resets the chosen agent and preserves both drafts while switching"
   expect(codex.getByLabelText("绑定操作")).toHaveValue("send");
   expect(onSave).toHaveBeenCalledWith("codex", { x: "send" });
   fireEvent.change(screen.getByRole("combobox", { name: "配置 Agent" }), { target: { value: "deepSeekHarness" } });
-  fireEvent.click(deepSeek.getByRole("button", { name: "恢复默认" }));
+  fireEvent.click(deepSeek.getByRole("button", { name: /重置.*全部映射/ }));
   expect(onReset).toHaveBeenLastCalledWith("deepSeekHarness");
   rerender(<AgentMappingEditor configuration={{ ...configuration,
     agentMappings: { codex: { x: "send" }, deepSeekHarness: { x: "none" } },

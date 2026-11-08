@@ -38,12 +38,23 @@ const photographedRemoteControls = [
 ] as const;
 
 describe("Dashboard", () => {
+  it("shows waiting and test states instead of claiming execution is enabled", () => {
+    const configuration = { controllerType: "xbox" as const, activeControllerIndex: 0, codexOnly: true,
+      dictationShortcut: "F12", mouseSpeed: 50, scrollSpeed: 50, deadZone: .12, startWithWindows: false,
+      mappings: {}, foregroundAgent: null };
+    const { rerender } = render(<Dashboard state={{ ...connectedState, configuration }} onToggleMapping={() => {}} />);
+    expect(screen.getByText("等待目标应用")).toBeInTheDocument();
+    rerender(<Dashboard state={{ ...connectedState, configuration, testMode: true }} onToggleMapping={() => {}} />);
+    expect(screen.getByText("测试中：仅检测输入")).toBeInTheDocument();
+    expect(screen.queryByText("映射可执行")).not.toBeInTheDocument();
+  });
+
   it("shows connected runtime state and immediate controller feedback", () => {
     render(<Dashboard state={connectedState} onToggleMapping={vi.fn()} />);
 
-    expect(screen.getByRole("heading", { name: "VibeController" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "设备状态" })).toBeInTheDocument();
     expect(screen.getByText("Xbox 手柄已连接")).toBeInTheDocument();
-    expect(screen.getByText("映射已启用")).toBeInTheDocument();
+    expect(screen.getByText("等待配置")).toBeInTheDocument();
     expect(screen.getByText("X → 切换听写快捷键")).toBeInTheDocument();
     expect(screen.getByTestId("controller-photo")).toHaveAttribute(
       "src",
@@ -147,7 +158,7 @@ describe("Dashboard", () => {
     expect(screen.getByTestId("control-remote-picture-mode")).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "遥控器侧边按键" })).toBeInTheDocument();
     expect(screen.getByText(
-      "专用驱动会自动识别 22 个已验证按键；无需逐键学习，连接后即可映射。",
+      "前台自动切换 · 等待目标应用",
     )).toBeInTheDocument();
     expect(screen.getByText("Windows HID")).toBeInTheDocument();
     expect(screen.getByText("22 键自动就绪")).toBeInTheDocument();

@@ -21,7 +21,11 @@ public sealed record RuntimeStatePayload(
     IReadOnlyDictionary<string, float> Controls,
     string? LastAction,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    RuntimeConfigurationPayload? Configuration = null);
+    RuntimeConfigurationPayload? Configuration = null,
+    RecentActionPayload? RecentAction = null);
+
+public sealed record RecentActionPayload(string Control, string? Action, string Status,
+    string? Message, AgentTarget Agent, ControllerType ControllerType);
 
 public sealed record RuntimeConfigurationPayload(
     ControllerType ControllerType,
@@ -42,7 +46,8 @@ public sealed record RuntimeConfigurationPayload(
     IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>? AgentMappings = null,
     AgentTarget ActiveAgent = AgentTarget.Codex,
     IReadOnlyDictionary<string, IReadOnlyList<AgentShortcutOption>>? AgentShortcuts = null,
-    long Revision = 0);
+    long Revision = 0,
+    AgentTarget? ForegroundAgent = null);
 
 public sealed record AgentShortcutOption(
     string Value,
@@ -61,7 +66,8 @@ public static class BridgeMessageFactory
     public static BridgeMessage<RuntimeStatePayload> RuntimeState(
         RuntimeState state,
         string? lastAction,
-        RuntimeConfigurationPayload? configuration = null)
+        RuntimeConfigurationPayload? configuration = null,
+        RecentActionPayload? recentAction = null)
     {
         var controls = state.Snapshot.Controls.ToDictionary(
             control => CamelCase(control.ToString()),
@@ -79,7 +85,8 @@ public static class BridgeMessageFactory
                 state.PacketNumber,
                 controls,
                 lastAction,
-                configuration));
+                configuration,
+                recentAction));
     }
 
     private static string CamelCase(string value) =>

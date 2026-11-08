@@ -19,6 +19,7 @@ export const actionOptions = [
   ["mouseMove", "鼠标：移动"],
   ["mouseLeftClick", "鼠标：左键单击"],
   ["mouseRightClick", "鼠标：右键单击"],
+  ["mouseScroll", "鼠标：随轴方向滚动"],
   ["mouseScrollUp", "鼠标：滚轮向上"],
   ["mouseScrollDown", "鼠标：滚轮向下"],
   ["none", "不执行操作"],
@@ -31,6 +32,8 @@ export const codexShortcutActions = new Set([
 ]);
 
 const labels = new Map<string, string>(actionOptions);
+
+export const continuousControls = new Set(["leftStickX", "leftStickY", "rightStickX", "rightStickY", "touchpadX", "touchpadY"]);
 
 export function getMappingDisplay(value: string | undefined, shortcuts?: AgentShortcutOption[]) {
   if (value?.startsWith("shortcut:")) {

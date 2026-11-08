@@ -32,6 +32,8 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
     private IReadOnlyList<AgentShortcutOption>? _deepSeekShortcuts;
     private IReadOnlyList<AgentShortcutOption>? _codexShortcuts;
     private AgentTarget _activeAgent = AgentTarget.Codex;
+    private AgentTarget? _foregroundAgent;
+    private RecentActionPayload? _recentAction;
     private MappingProfile? _runtimeProfile;
     private IReadOnlyDictionary<string, string> _formattedMappings =
         new Dictionary<string, string>();
@@ -313,10 +315,12 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
             _nextConfigurationPublish = timestamp.Add(IntegrationPollInterval);
             _stateDirty = false;
         }
+        _recentAction = BuildRecentAction(result) ?? _recentAction;
         var message = BridgeMessageFactory.RuntimeState(
             result.State,
-            DescribeLastAction(result, _settings.ControllerType),
-            publishConfiguration ? _lastConfiguration : null);
+            null,
+            publishConfiguration ? _lastConfiguration : null,
+            _recentAction);
         var json = BridgeJson.Serialize(message);
         if (publishConfiguration || !string.Equals(json, _lastRuntimeJson, StringComparison.Ordinal))
         {
@@ -777,6 +781,8 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
             {
                 if (!MappedActionCodec.TryParse(property.Value.GetString(), out var action))
                     throw new InvalidOperationException("无效的映射操作");
+                if (!MappingEngine.AllowsAction(control, action.Kind))
+                    throw new InvalidOperationException("连续轴仅可绑定移动、滚动或不执行操作");
                 if (action.Kind == MappedActionKind.KeyboardShortcut)
                     _ = KeyboardInputBuilder.Build(action.Shortcut!);
                 mappings.Add(new(control, action));
@@ -803,9 +809,16 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
     private void ResetMappings(JsonElement payload)
     {
         if (!TryMappingAgent(payload, out var agent)) return;
-        var nextSettings = agent == AgentTarget.Codex
-            ? _settings with { Profile = DefaultProfileFactory.Create() }
-            : _settings with { DeepSeekHarnessProfile = DefaultProfileFactory.CreateDeepSeekHarness() };
+        var defaults = agent == AgentTarget.Codex ? DefaultProfileFactory.Create() : DefaultProfileFactory.CreateDeepSeekHarness();
+        var profile = defaults;
+        if (payload.TryGetProperty("control", out var item))
+        {
+            if (!TryControl(item.GetString() ?? "", out var control) || !defaults.TryGetAction(control, out var action))
+                throw new InvalidOperationException("无法重置该按键");
+            profile = _settings.GetProfile(agent).WithMapping(control, action);
+        }
+        var nextSettings = agent == AgentTarget.Codex ? _settings with { Profile = profile }
+            : _settings with { DeepSeekHarnessProfile = profile };
         _settings = nextSettings;
         _stateDirty = true;
         UpdateActiveProfile();
@@ -855,8 +868,11 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
 
     private void UpdateActiveProfile()
     {
+        var foreground = _foregroundAppService.GetForegroundAgent();
+        if (_foregroundAgent != foreground) _stateDirty = true;
+        _foregroundAgent = foreground;
         var agent = _settings.CodexOnly
-            ? _foregroundAppService.GetForegroundAgent() ?? AgentTarget.Codex
+            ? foreground ?? AgentTarget.Codex
             : AgentTarget.Codex;
         if (_activeAgent != agent) _stateDirty = true;
         _activeAgent = agent;
@@ -866,75 +882,27 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
         _runtimeProfile = profile;
     }
 
-    private string? DescribeLastAction(
-        RuntimeTickResult result,
-        ControllerType controllerType)
+    private RecentActionPayload? BuildRecentAction(RuntimeTickResult result)
     {
         var dispatch = result.DispatchResults.LastOrDefault();
-        if (dispatch is not null && dispatch.Status != ActionDispatchStatus.Dispatched)
+        if (dispatch?.Invocation is { } invocation)
         {
-            return dispatch.Message;
+            if (invocation.Input.Edge == InputEdge.Changed && MathF.Abs(invocation.Input.Value) < 0.001f) return null;
+            return new(FormatControl(invocation.Input.Control), MappedActionCodec.Format(invocation.Action),
+                dispatch.Status.ToString().ToLowerInvariant(), dispatch.Message, _activeAgent, _settings.ControllerType);
         }
-        var input = result.InputEvents.LastOrDefault(item =>
-            item.Edge == InputEdge.Pressed ||
-            item is
-            {
-                Edge: InputEdge.Changed,
-                Control: ControllerControl.TouchpadX or ControllerControl.TouchpadY,
-            });
+        var input = result.InputEvents.LastOrDefault(item => item.Edge != InputEdge.Released &&
+            (item.Edge != InputEdge.Changed || MathF.Abs(item.Value) >= 0.001f));
         if (input is null) return null;
-        if (_activeAgent == AgentTarget.DeepSeekHarness &&
-            _settings.DeepSeekHarnessProfile.TryGetAction(input.Control, out var action))
+        var status = result.State.TestMode ? "test" : !result.State.MappingEnabled ? "paused" : "unmapped";
+        var message = status switch
         {
-            var command = _deepSeekShortcuts?.FirstOrDefault(option => option.Value == MappedActionCodec.Format(action));
-            if (command is not null) return $"{input.Control} → {command.Label} · {command.Shortcut}（DeepSeek Harness）";
-            var description = action.Shortcut is { } shortcut
-                ? FormatShortcut(shortcut) : MappedActionCodec.Format(action);
-            return $"{input.Control} → {description}（DeepSeek Harness）";
-        }
-        if (controllerType == ControllerType.PlayStation5)
-        {
-            return input.Control switch
-            {
-                ControllerControl.X => "□ 方块键 → 切换听写快捷键",
-                ControllerControl.A => "× 叉键 → 发送消息",
-                ControllerControl.B => "○ 圆圈键 → Backspace（删除上一个字符）",
-                ControllerControl.Y => "△ 三角键 → 打开命令菜单",
-                ControllerControl.Menu => "Options → 激活 Codex 窗口",
-                ControllerControl.LeftBumper => "L1 → 上一个任务",
-                ControllerControl.RightBumper => "R1 → 下一项任务",
-                ControllerControl.TouchpadX or ControllerControl.TouchpadY =>
-                    "触控板滑动 → 移动鼠标光标",
-                ControllerControl.TouchpadButton => "触控板按下 → 鼠标左键单击",
-                _ => DescribeSharedControl(input.Control),
-            };
-        }
-
-        return input.Control switch
-        {
-            ControllerControl.X => "X → 切换听写快捷键",
-            ControllerControl.A => "A → 发送消息",
-            ControllerControl.B => "B → Backspace（删除上一个字符）",
-            ControllerControl.Y => "Y → 打开命令菜单",
-            ControllerControl.Menu => "菜单键 → 激活 Codex 窗口",
-            ControllerControl.LeftBumper => "LB → 上一个任务",
-            ControllerControl.RightBumper => "RB → 下一项任务",
-            _ => DescribeSharedControl(input.Control),
+            "test" => "仅检测输入，未执行操作",
+            "paused" => "映射已暂停，未执行操作",
+            _ => "未绑定可执行操作",
         };
+        return new(FormatControl(input.Control), null, status, message, _activeAgent, _settings.ControllerType);
     }
-
-    private static string DescribeSharedControl(ControllerControl control) => control switch
-    {
-        ControllerControl.DPadLeft => "方向键左 → 降低推理强度",
-        ControllerControl.DPadRight => "方向键右 → 提高推理强度",
-        ControllerControl.DPadUp => "方向键上 → ↑（ArrowUp）",
-        ControllerControl.DPadDown => "方向键下 → ↓（ArrowDown）",
-        ControllerControl.RightStickLeft => "右摇杆左 → ←（ArrowLeft）",
-        ControllerControl.RightStickRight => "右摇杆右 → →（ArrowRight）",
-        ControllerControl.RightStickUp => "右摇杆上 → ↑（ArrowUp）",
-        ControllerControl.RightStickDown => "右摇杆下 → ↓（ArrowDown）",
-        _ => $"{control} → 已触发",
-    };
 
     private void RefreshIntegrations()
     {
@@ -1049,7 +1017,7 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
             {
                 ["codex"] = _codexShortcuts ??= _codexShortcutResolver.GetShortcuts(),
                 ["deepSeekHarness"] = _deepSeekShortcuts ??= _deepSeekShortcutResolver.GetShortcuts(),
-            }, Interlocked.Read(ref _configurationRevision));
+            }, Interlocked.Read(ref _configurationRevision), _foregroundAgent);
     }
 
     private static IReadOnlyDictionary<string, string> FormatMappings(MappingProfile profile) =>

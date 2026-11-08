@@ -1,5 +1,5 @@
 import type { AgentShortcutOption, AgentTarget } from "../app/types";
-import { actionOptions, codexShortcutActions } from "../app/mappingActions";
+import { actionOptions, codexShortcutActions, continuousControls } from "../app/mappingActions";
 export { actionOptions } from "../app/mappingActions";
 
 interface ActionPickerProps {
@@ -7,9 +7,11 @@ interface ActionPickerProps {
   onChange(value: string): void;
   agent?: AgentTarget;
   shortcutOptions?: AgentShortcutOption[];
+  control?: string;
 }
 
-export function ActionPicker({ value, onChange, agent = "codex", shortcutOptions }: ActionPickerProps) {
+export function ActionPicker({ value, onChange, agent = "codex", shortcutOptions, control }: ActionPickerProps) {
+  const continuous = continuousControls.has(control ?? "");
   const agentName = agent === "codex" ? "Codex" : "DeepSeek Harness";
   const activation = agent === "codex" ? "activateCodex" : "activateDeepSeekHarness";
   const commands = shortcutOptions ?? (agent === "codex"
@@ -19,6 +21,8 @@ export function ActionPicker({ value, onChange, agent = "codex", shortcutOptions
   return <label className="field-stack">
     <span>绑定操作</span>
     <select aria-label="绑定操作" value={value} onChange={(event) => onChange(event.target.value)}>
+      {continuous ? actionOptions.filter(([kind]) => ["mouseMove", "mouseScroll", "none"].includes(kind))
+        .map(([kind, label]) => <option key={kind} value={kind}>{label}</option>) : <>
       <optgroup label={`${agentName} 操作`}>
         {commands.map((option) => <option key={option.value} value={option.value}>
           {actionOptions.find(([kind]) => kind === option.value)?.[1] ?? option.label}
@@ -28,6 +32,7 @@ export function ActionPicker({ value, onChange, agent = "codex", shortcutOptions
       <optgroup label="键盘与鼠标">
         {common.map(([optionValue, label]) => <option key={optionValue} value={optionValue}>{label}</option>)}
       </optgroup>
+      </>}
     </select>
   </label>;
 }

@@ -5,6 +5,19 @@ namespace VibeController.Core.Tests.Mapping;
 
 public sealed class MappingEngineTests
 {
+    [Theory]
+    [InlineData(MappedActionKind.MouseMove, true)]
+    [InlineData(MappedActionKind.MouseScroll, true)]
+    [InlineData(MappedActionKind.Send, false)]
+    [InlineData(MappedActionKind.KeyboardShortcut, false)]
+    public void ContinuousAxesUseOnlyTheFixedAllowedActions(MappedActionKind kind, bool allowed)
+    {
+        var profile = DefaultProfileFactory.Create().WithMapping(ControllerControl.LeftStickX, new(kind));
+        var result = new MappingEngine(profile).Resolve(new(ControllerControl.LeftStickX, InputEdge.Changed, .8f, DateTimeOffset.UnixEpoch), true);
+        Assert.Equal(allowed, result.Count == 1);
+        Assert.True(MappingEngine.AllowsAction(ControllerControl.A, kind));
+    }
+
     private static readonly DateTimeOffset Timestamp =
         DateTimeOffset.Parse("2026-07-18T00:00:00Z");
 

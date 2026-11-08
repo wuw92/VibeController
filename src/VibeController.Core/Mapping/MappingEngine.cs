@@ -27,7 +27,7 @@ public sealed class MappingEngine
     {
         if (!isEnabled ||
             !_profile.TryGetAction(input.Control, out var action) ||
-            action.Kind == MappedActionKind.None)
+            action.Kind == MappedActionKind.None || !AllowsAction(input.Control, action.Kind))
         {
             return [];
         }
@@ -44,6 +44,9 @@ public sealed class MappingEngine
 
         return shouldInvoke ? [new ActionInvocation(action, input)] : [];
     }
+
+    public static bool AllowsAction(ControllerControl control, MappedActionKind kind) =>
+        !ContinuousControls.Contains(control) || kind is MappedActionKind.MouseMove or MappedActionKind.MouseScroll or MappedActionKind.None;
 
     private static bool IsRepeatableAction(MappedActionKind kind) => kind is
         MappedActionKind.KeyboardShortcut or

@@ -87,7 +87,6 @@ public sealed class MappedActionCodecTests
     [Theory]
     [InlineData("previousModel")]
     [InlineData("nextModel")]
-    [InlineData("mouseScroll")]
     public void TryParse_RejectsRemovedOrAmbiguousActions(string name)
     {
         Assert.False(MappedActionCodec.TryParse(name, out _));

@@ -11,6 +11,19 @@ namespace VibeController.Infrastructure.Tests.App;
 public sealed class ConfigurationAutosaveTests
 {
     [Fact]
+    public async Task ResetCurrentControlPreservesOtherMappings()
+    {
+        var store = new Store();
+        await using var service = new ControllerRuntimeService(store, foregroundAppService: new Foreground());
+        await service.HandleCommandAsync(JsonSerializer.Serialize(new { version = 1, type = "updateMapping",
+            payload = new { agent = "codex", mappings = new { x = "shortcut:F8", a = "shortcut:F9" } } }));
+        await service.HandleCommandAsync(JsonSerializer.Serialize(new { version = 1, type = "resetDefaults",
+            payload = new { agent = "codex", control = "x" } }));
+        Assert.Equal("dictation", Configuration(service).Mappings["x"]);
+        Assert.Equal("shortcut:F9", Configuration(service).Mappings["a"]);
+    }
+
+    [Fact]
     public async Task ChangesApplyImmediatelyAndBurstWritesPersistOnlyTheLatestSettings()
     {
         var store = new Store();

@@ -27,6 +27,23 @@ function MappingEditor(props: ComponentProps<typeof HostMappingEditor>) {
 afterEach(cleanup);
 
 describe("MappingEditor", () => {
+  it("offers fixed movement and scrolling choices for a continuous axis", () => {
+    render(<MappingEditor onSave={() => {}} onReset={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "左摇杆横轴" }));
+    expect(screen.getAllByRole("option").map((option) => option.getAttribute("value"))).toEqual(["mouseMove", "mouseScroll", "none"]);
+  });
+
+  it("separates resetting the current key from resetting the whole agent", () => {
+    const reset = vi.fn();
+    const resetControl = vi.fn();
+    render(<MappingEditor onSave={() => {}} onReset={reset} onResetControl={resetControl} />);
+    fireEvent.click(screen.getByRole("button", { name: "重置此按键" }));
+    expect(resetControl).toHaveBeenCalledWith("x");
+    expect(reset).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "重置 Codex 全部映射" }));
+    expect(reset).toHaveBeenCalledOnce();
+  });
+
   it("shows Codex effective keys outside the operation menu and follows host updates", () => {
     const props = { onSave: vi.fn(), onReset: vi.fn(), initialValues: { x: "send" } };
     const { rerender } = render(<HostMappingEditor {...props} shortcutOptions={[
@@ -73,7 +90,7 @@ describe("MappingEditor", () => {
     const onSave = vi.fn();
     render(<HostMappingEditor onSave={onSave} onReset={vi.fn()} />);
     expect(screen.getByLabelText("绑定操作")).toBeDisabled();
-    expect(screen.getByRole("button", { name: "恢复默认" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /重置.*全部映射/ })).toBeDisabled();
     expect(onSave).not.toHaveBeenCalled();
   });
 
@@ -88,13 +105,13 @@ describe("MappingEditor", () => {
     fireEvent.click(screen.getByRole("button", { name: "Y 按键" }));
     fireEvent.change(screen.getByLabelText("绑定操作"), { target: { value: "dictation" } });
 
-    expect(screen.getByRole("alert")).toHaveTextContent("与 X 按键冲突");
+    expect(screen.getByText("重复绑定：X 按键 也会触发该操作。")).toBeInTheDocument();
   });
 
   it("can reset the default profile", () => {
     const onReset = vi.fn();
     render(<MappingEditor onSave={vi.fn()} onReset={onReset} />);
-    fireEvent.click(screen.getByRole("button", { name: "恢复默认" }));
+    fireEvent.click(screen.getByRole("button", { name: /重置.*全部映射/ }));
     expect(onReset).toHaveBeenCalledOnce();
   });
 

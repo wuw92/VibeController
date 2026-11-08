@@ -160,7 +160,7 @@ button {
 
 .dashboard h1 {
   margin: 0;
-  font-size: clamp(2rem, 4vw, 3.25rem);
+  font-size: 32px;
   font-weight: 650;
   line-height: 1.02;
   letter-spacing: -0.045em;
@@ -225,7 +225,8 @@ button {
 .controller-card {
   position: relative;
   display: grid;
-  min-height: 520px;
+  min-height: 0;
+  height: clamp(360px, calc(100dvh - 240px), 580px);
   padding: 26px;
   place-items: center;
   overflow: hidden;
@@ -261,7 +262,7 @@ button {
 }
 
 .controller-photo-stage--dualsense {
-  width: min(560px, 94%);
+  width: min(560px, 94%, calc(100dvh - 330px));
   aspect-ratio: 1;
 }
 
@@ -873,13 +874,7 @@ button {
 }
 
 @media (max-width: 1040px) {
-  .dashboard-grid {
-    grid-template-columns: 1fr;
-  }
 
-  .side-stack {
-    grid-template-columns: 1fr 1fr;
-  }
 
   .integration-status-grid { grid-template-columns: 1fr; }
   .rc901a-key-learning-list { grid-template-columns: 1fr; }
@@ -940,3 +935,21 @@ button {
 }
 
 .configuration-persistence-error { margin: 24px 48px 0; padding: 12px 16px; border-radius: 10px; background: var(--amber-soft); color: var(--amber); font-size: 13px; }
+
+.mapping-page { display: flex; flex-direction: column; height: calc(100dvh - 140px); }
+.mapping-page > .page-heading, .mapping-page > .mapping-toolbar { flex: 0 0 auto; }
+.mapping-page > .editor-grid { flex: 1; min-height: 0; grid-template-rows: minmax(0, 1fr); }
+.mapping-page .mapping-list { max-height: none; min-height: 0; }
+.mapping-page .inspector-card { min-height: 0; overflow-y: auto; }
+.reset-control { margin-left: auto; font-size: 11px; padding: 7px 10px; }
+.duplicate-binding, .execution-note { margin: 12px 0 0; color: var(--ink-secondary); font-size: 12px; line-height: 1.5; }
+.mapping-link { margin-top: 16px; width: 100%; justify-content: center; }
+.dashboard .control-list { gap: 8px; }
+.dashboard .control-row-description { gap: 2px; }
+.dashboard-grid { align-items: start; }
+@media (max-width: 760px) {
+  .mapping-page { display: block; height: auto; }
+  .mapping-page > .editor-grid { grid-template-rows: auto; }
+  .mapping-page .mapping-list { max-height: 360px; }
+  .dashboard-grid, .side-stack { grid-template-columns: 1fr; }
+}

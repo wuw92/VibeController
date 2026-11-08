@@ -4,6 +4,7 @@ import type { RuntimeStatePayload } from "./app/types";
 
 const mocked = vi.hoisted(() => ({
   send: vi.fn(),
+  request: vi.fn(() => new Promise(() => {})),
   setState: vi.fn(),
   state: {
     connectionState: "connected",
@@ -49,7 +50,7 @@ const mocked = vi.hoisted(() => ({
 }));
 
 vi.mock("./app/AppBridge", () => ({
-  appBridge: { send: mocked.send },
+  appBridge: { send: mocked.send, request: mocked.request, subscribe: () => () => {} },
 }));
 
 vi.mock("./app/useRuntimeState", () => ({

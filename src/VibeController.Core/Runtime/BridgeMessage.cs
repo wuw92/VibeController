@@ -7,6 +7,11 @@ namespace VibeController.Core.Runtime;
 
 public sealed record BridgeMessage<T>(int Version, string Type, T Payload);
 
+public sealed record CommandResultPayload(string RequestId, bool Succeeded,
+    RuntimeConfigurationPayload Configuration, string? Error = null);
+
+public sealed record SettingsPersistencePayload(string? Error);
+
 public sealed record RuntimeStatePayload(
     string ConnectionState,
     int ControllerIndex,
@@ -36,7 +41,8 @@ public sealed record RuntimeConfigurationPayload(
     Rc901aInputStatus? Rc901aInput = null,
     IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>? AgentMappings = null,
     AgentTarget ActiveAgent = AgentTarget.Codex,
-    IReadOnlyDictionary<string, IReadOnlyList<AgentShortcutOption>>? AgentShortcuts = null);
+    IReadOnlyDictionary<string, IReadOnlyList<AgentShortcutOption>>? AgentShortcuts = null,
+    long Revision = 0);
 
 public sealed record AgentShortcutOption(
     string Value,

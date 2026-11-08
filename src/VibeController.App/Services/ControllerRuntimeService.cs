@@ -39,6 +39,8 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly SemaphoreSlim _settingsWriteGate = new(1, 1);
     private AppSettings _settings = AppSettings.CreateDefault();
+    private bool _settingsSavePending;
+    private Task? _settingsSaveTask;
     private ControllerRuntime? _runtime;
     private IControllerLightbar? _lightbar;
     private Rc901aControllerAdapter? _rc901aAdapter;
@@ -125,6 +127,8 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
 
         var type = typeElement.GetString();
         var payload = root.TryGetProperty("payload", out var value) ? value : default;
+        var requestId = root.TryGetProperty("requestId", out var request) ? request.GetString() : null;
+        CommandResultPayload? commandResult = null;
 
         if (string.Equals(
                 type,
@@ -135,7 +139,8 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
             return;
         }
 
-        var serializesSettingsWrite = CommandWritesSettings(type);
+        var serializesSettingsWrite = CommandWritesSettings(type) &&
+            type is not ("updateMapping" or "updateSettings" or "resetDefaults");
         if (serializesSettingsWrite)
         {
             await _settingsWriteGate.WaitAsync(_cancellation.Token);
@@ -158,13 +163,13 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
                         _stateDirty = true;
                         break;
                     case "updateSettings":
-                        await UpdateSettingsAsync(payload);
+                        UpdateSettings(payload);
                         break;
                     case "updateMapping":
-                        await UpdateMappingAsync(payload);
+                        UpdateMapping(payload);
                         break;
                     case "resetDefaults":
-                        await ResetMappingsAsync(payload);
+                        ResetMappings(payload);
                         break;
                     case "requestState":
                         PublishCurrent();
@@ -194,6 +199,12 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
                         await ResetRc901aLearnedBindingsAsync();
                         break;
                 }
+                if (requestId is not null)
+                    commandResult = new(requestId, true, BuildConfiguration());
+            }
+            catch (Exception exception) when (requestId is not null && exception is not OperationCanceledException)
+            {
+                commandResult = new(requestId, false, BuildConfiguration(), exception.Message);
             }
             finally
             {
@@ -207,6 +218,8 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
                 _settingsWriteGate.Release();
             }
         }
+        if (commandResult is not null)
+            StateJsonReady?.Invoke(BridgeJson.Serialize(new BridgeMessage<CommandResultPayload>(1, "commandResult", commandResult)));
     }
 
     private static bool CommandWritesSettings(string? type) =>
@@ -498,7 +511,7 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
                                 _rc901aLearning.CompleteSave(sessionId);
                             if (commitAccepted)
                             {
-                                _settings = nextSettings!;
+                                _settings = _settings with { Rc901aLearnedBindings = nextSettings!.Rc901aLearnedBindings };
                             }
                         }
                         else
@@ -643,6 +656,7 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
             nextSettings,
             _cancellation.Token);
         _settings = nextSettings;
+        Interlocked.Increment(ref _configurationRevision);
         _rc901aAdapter?.ResetInputState();
         RebuildRuntime();
         _stateDirty = true;
@@ -698,7 +712,7 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
             Rc901aConnectionState.Connected or
             Rc901aConnectionState.ConnectedLimited;
 
-    private async Task UpdateSettingsAsync(JsonElement payload)
+    private void UpdateSettings(JsonElement payload)
     {
         var previousControllerType = _settings.ControllerType;
         var previousLightbarEnabled = _settings.CodexLightbarEnabled;
@@ -712,13 +726,7 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
             controllerType = parsedControllerType;
         }
 
-        if (controllerType != previousControllerType &&
-            DisconnectRc901aLearning())
-        {
-            _rc901aAdapter?.ResetInputState();
-        }
-
-        _settings = _settings with
+        var nextSettings = _settings with
         {
             ControllerType = controllerType,
             CodexOnly = payload.GetProperty("codexOnly").GetBoolean(),
@@ -732,6 +740,11 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
                 ? lightbarEnabled.GetBoolean()
                 : previousLightbarEnabled,
         };
+        var previousStartWithWindows = _settings.StartWithWindows;
+        _settings = nextSettings;
+        Interlocked.Increment(ref _configurationRevision);
+        if (controllerType != previousControllerType && DisconnectRc901aLearning())
+            _rc901aAdapter?.ResetInputState();
         _stateDirty = true;
 
         UpdateActiveProfile();
@@ -746,33 +759,38 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
         }
 
         var executablePath = Environment.ProcessPath;
-        if (executablePath is not null)
+        if (executablePath is not null && previousStartWithWindows != _settings.StartWithWindows)
         {
             new StartupManager().SetEnabled(_settings.StartWithWindows, executablePath);
         }
-        await _settingsStore.SaveAsync(_settings, _cancellation.Token);
+        QueueSettingsSave();
     }
 
-    private async Task UpdateMappingAsync(JsonElement payload)
+    private void UpdateMapping(JsonElement payload)
     {
         if (!TryMappingAgent(payload, out var agent)) return;
         var values = payload.TryGetProperty("mappings", out var nested) ? nested : payload;
         var mappings = new List<KeyValuePair<ControllerControl, MappedAction>>();
         foreach (var property in values.EnumerateObject())
         {
-            if (TryControl(property.Name, out var control) &&
-                MappedActionCodec.TryParse(property.Value.GetString(), out var action))
+            if (TryControl(property.Name, out var control))
             {
+                if (!MappedActionCodec.TryParse(property.Value.GetString(), out var action))
+                    throw new InvalidOperationException("无效的映射操作");
+                if (action.Kind == MappedActionKind.KeyboardShortcut)
+                    _ = KeyboardInputBuilder.Build(action.Shortcut!);
                 mappings.Add(new(control, action));
             }
         }
         var profile = _settings.GetProfile(agent).WithMappings(mappings);
-        _settings = agent == AgentTarget.Codex
+        var nextSettings = agent == AgentTarget.Codex
             ? _settings with { Profile = profile }
             : _settings with { DeepSeekHarnessProfile = profile };
+        _settings = nextSettings;
         _stateDirty = true;
         UpdateActiveProfile();
-        await _settingsStore.SaveAsync(_settings, _cancellation.Token);
+        Interlocked.Increment(ref _configurationRevision);
+        QueueSettingsSave();
     }
 
     private static bool TryMappingAgent(JsonElement payload, out AgentTarget agent)
@@ -782,15 +800,57 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
             (Enum.TryParse(value.GetString(), true, out agent) && Enum.IsDefined(agent));
     }
 
-    private async Task ResetMappingsAsync(JsonElement payload)
+    private void ResetMappings(JsonElement payload)
     {
         if (!TryMappingAgent(payload, out var agent)) return;
-        _settings = agent == AgentTarget.Codex
+        var nextSettings = agent == AgentTarget.Codex
             ? _settings with { Profile = DefaultProfileFactory.Create() }
             : _settings with { DeepSeekHarnessProfile = DefaultProfileFactory.CreateDeepSeekHarness() };
+        _settings = nextSettings;
         _stateDirty = true;
         UpdateActiveProfile();
-        await _settingsStore.SaveAsync(_settings, _cancellation.Token);
+        Interlocked.Increment(ref _configurationRevision);
+        QueueSettingsSave();
+    }
+
+    private void QueueSettingsSave()
+    {
+        _settingsSavePending = true;
+        _settingsSaveTask ??= PersistSettingsAsync();
+    }
+
+    public Task FlushSettingsAsync() => _settingsSaveTask ?? Task.CompletedTask;
+
+    private async Task PersistSettingsAsync()
+    {
+        while (true)
+        {
+            await Task.Delay(200).ConfigureAwait(false);
+            await _settingsWriteGate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                await _gate.WaitAsync().ConfigureAwait(false);
+                AppSettings snapshot;
+                try { snapshot = _settings; _settingsSavePending = false; }
+                finally { _gate.Release(); }
+                string? error = null;
+                try { await _settingsStore.SaveAsync(snapshot, CancellationToken.None).ConfigureAwait(false); }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                    error = exception.Message;
+                }
+                StateJsonReady?.Invoke(BridgeJson.Serialize(new BridgeMessage<SettingsPersistencePayload>(
+                    1, "settingsPersistence", new(error))));
+            }
+            finally { _settingsWriteGate.Release(); }
+
+            await _gate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                if (!_settingsSavePending) { _settingsSaveTask = null; return; }
+            }
+            finally { _gate.Release(); }
+        }
     }
 
     private void UpdateActiveProfile()
@@ -989,7 +1049,7 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
             {
                 ["codex"] = _codexShortcuts ??= _codexShortcutResolver.GetShortcuts(),
                 ["deepSeekHarness"] = _deepSeekShortcuts ??= _deepSeekShortcutResolver.GetShortcuts(),
-            });
+            }, Interlocked.Read(ref _configurationRevision));
     }
 
     private static IReadOnlyDictionary<string, string> FormatMappings(MappingProfile profile) =>
@@ -1133,6 +1193,7 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
     {
         UnsubscribeFromRc901aInput();
         _cancellation.Cancel();
+        await FlushSettingsAsync();
         if (_loop is not null)
         {
             try { await _loop; } catch (OperationCanceledException) { }

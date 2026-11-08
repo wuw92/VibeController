@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from "react";
-import { Battery, Bluetooth, Clipboard, Gamepad2, Lightbulb, Mic2, Radio, RefreshCw, Save, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Battery, Bluetooth, Clipboard, Gamepad2, Lightbulb, Mic2, Radio, RefreshCw, Trash2 } from "lucide-react";
+import { AutoSaveFeedback } from "../components/AutoSaveFeedback";
 import { SliderField } from "../components/SliderField";
 import { Rc901aLearningPanel } from "../components/Rc901aLearningPanel";
 import { rc901aPairingInstruction } from "../app/controllerPresentation";
 import type {
+  AutoSaveStatus,
   CodexActivityStatus,
   CodexHookRegistrationStatus,
   ControllerType,
@@ -40,6 +42,7 @@ interface SettingsProps {
   onCancelRc901aLearning?(sessionId: string): void;
   onResetRc901aLearnedBindings?(): void;
   initialValues?: SettingsValues;
+  saveStatus?: AutoSaveStatus;
   persistedControllerType?: ControllerType;
   rc901aLearningReady?: boolean;
   microphone?: MicrophoneStatus;
@@ -85,6 +88,7 @@ export function Settings({
   onCancelRc901aLearning,
   onResetRc901aLearnedBindings,
   initialValues,
+  saveStatus,
   persistedControllerType,
   rc901aLearningReady = false,
   microphone,
@@ -94,36 +98,15 @@ export function Settings({
   rc901aInput,
 }: SettingsProps) {
   const [values, setValues] = useState<SettingsValues>(initialValues ?? defaultSettings);
-  const draftRevision = useRef(0);
-  const submissions = useRef<{ snapshot: string; revision: number }[]>([]);
-  const lastIncoming = useRef<string | undefined>(undefined);
   const serializedInitialValues = initialValues ? serializeSettings(initialValues) : null;
   useEffect(() => {
-    if (serializedInitialValues === null) return;
-    const acknowledgedIndex = submissions.current
-      .map((submission) => submission.snapshot).lastIndexOf(serializedInitialValues);
-    if (acknowledgedIndex >= 0) {
-      const acknowledged = submissions.current[acknowledgedIndex];
-      submissions.current.splice(0, acknowledgedIndex + 1);
-      if (draftRevision.current > acknowledged.revision) {
-        lastIncoming.current = serializedInitialValues;
-        return;
-      }
-    } else if (submissions.current.length > 0) {
-      // App may optimistically publish other saved fields before controller selection is acknowledged.
-      return;
-    }
-    if (lastIncoming.current === serializedInitialValues) return;
-    lastIncoming.current = serializedInitialValues;
+    if (serializedInitialValues === null || saveStatus?.state === "applying") return;
     setValues(JSON.parse(serializedInitialValues) as SettingsValues);
-  }, [serializedInitialValues, initialValues]);
+  }, [serializedInitialValues, saveStatus?.state]);
   const update = <K extends keyof SettingsValues>(key: K, value: SettingsValues[K]) => {
-    draftRevision.current++;
-    setValues((current) => ({ ...current, [key]: value }));
-  };
-  const saveSettings = () => {
-    submissions.current.push({ snapshot: serializeSettings(values), revision: draftRevision.current });
-    onSave(values);
+    const next = { ...values, [key]: value };
+    setValues(next);
+    onSave(next);
   };
   const microphoneName = microphone?.defaultDeviceName ?? (
     microphone?.state === "noDevices" ? "未检测到录音设备" : "等待检测"
@@ -134,7 +117,7 @@ export function Settings({
     : codexHook?.installed
       ? `Hook 已安装 · ${activityLabels[activityState]}`
       : values.codexLightbarEnabled
-        ? "保存后安装 Hook"
+        ? "正在配置 Hook"
         : "未启用";
   const rc901aConnectionLabels = {
     idle: "等待连接",
@@ -150,7 +133,7 @@ export function Settings({
   const rc901aSelectionSaved = persistedControllerType === "tclRc901a";
   const rc901aLearningEnabled = rc901aSelectionSaved && rc901aLearningReady;
   const rc901aLearningUnavailableReason = !rc901aSelectionSaved
-    ? "先保存设备设置"
+    ? "正在切换设备，请稍候"
     : !rc901aLearningReady
       ? "先连接遥控器"
       : undefined;
@@ -161,11 +144,12 @@ export function Settings({
         <div>
           <p className="eyebrow">Preferences</p>
           <h1>设置</h1>
-          <p>调整安全边界、摇杆手感和启动行为。</p>
+          <p>{initialValues ? "调整设备、输入手感和启动行为，修改后即生效。" : "等待应用配置…"}</p>
         </div>
+        <AutoSaveFeedback status={saveStatus} />
       </header>
 
-      <div className="settings-grid">
+      <fieldset className="settings-grid" disabled={!initialValues}>
         <section className="settings-card">
           <h2>安全与启动</h2>
           <label className="switch-row">
@@ -312,7 +296,7 @@ export function Settings({
             <label className="switch-row lightbar-switch">
               <span>
                 <strong>使用 DualSense 灯条显示 Codex 状态</strong>
-                <small>开启并保存后，会备份并合并用户级 Codex Hook；首次使用需在 Codex 中信任。</small>
+                <small>开启后，会备份并合并用户级 Codex Hook；首次使用需在 Codex 中信任。</small>
               </span>
               <input aria-label="使用 DualSense 灯条显示 Codex 状态" type="checkbox" checked={values.codexLightbarEnabled} onChange={(event) => update("codexLightbarEnabled", event.target.checked)} />
             </label>
@@ -335,11 +319,8 @@ export function Settings({
           <p>复制当前版本、设备状态和运行配置，便于排查连接问题。</p>
           <button className="quiet-button" type="button" onClick={onCopyDiagnostics}><Clipboard size={15} />复制诊断信息</button>
         </section>
-      </div>
+      </fieldset>
 
-      <footer className="settings-footer">
-        <button className="primary-button" type="button" onClick={saveSettings}><Save size={15} />保存设置</button>
-      </footer>
     </main>
   );
 }

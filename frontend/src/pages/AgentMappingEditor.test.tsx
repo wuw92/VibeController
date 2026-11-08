@@ -21,13 +21,11 @@ it("saves and resets the chosen agent and preserves both drafts while switching"
   const deepSeek = within(screen.getByRole("group", { name: "deepSeekHarness 映射" }));
   expect(deepSeek.queryByRole("option", { name: "切换听写快捷键" })).not.toBeInTheDocument();
   fireEvent.keyDown(deepSeek.getByLabelText("自定义快捷键"), { key: "K", ctrlKey: true });
-  fireEvent.click(deepSeek.getByRole("button", { name: "保存映射" }));
   expect(onSave).toHaveBeenLastCalledWith("deepSeekHarness", { x: "shortcut:Ctrl+K" });
   fireEvent.change(screen.getByRole("combobox", { name: "配置 Agent" }), { target: { value: "codex" } });
   const codex = within(screen.getByRole("group", { name: "codex 映射" }));
   expect(codex.getByLabelText("绑定操作")).toHaveValue("send");
-  fireEvent.click(codex.getByRole("button", { name: "保存映射" }));
-  expect(onSave).toHaveBeenLastCalledWith("codex", { x: "send" });
+  expect(onSave).toHaveBeenCalledWith("codex", { x: "send" });
   fireEvent.change(screen.getByRole("combobox", { name: "配置 Agent" }), { target: { value: "deepSeekHarness" } });
   fireEvent.click(deepSeek.getByRole("button", { name: "恢复默认" }));
   expect(onReset).toHaveBeenLastCalledWith("deepSeekHarness");
@@ -64,6 +62,5 @@ it("shows current DSH keys outside the menu and synchronizes without discarding 
   expect(editor.getByLabelText("绑定操作")).toHaveValue("deepseek:session.search");
   expect(within(editor.getByRole("region", { name: "当前生效快捷键" })).getByText("Ctrl+J")).toBeInTheDocument();
   expect(editor.getByText("由 DeepSeek Harness 管理，设置变化后自动同步。")).toBeInTheDocument();
-  fireEvent.click(editor.getByRole("button", { name: "保存映射" }));
   expect(onSave).toHaveBeenLastCalledWith("deepSeekHarness", { x: "deepseek:session.search" });
 });

@@ -6,13 +6,13 @@ interface ShortcutRecorderProps {
 export function ShortcutRecorder({ value, onChange }: ShortcutRecorderProps) {
   const record = (event: React.KeyboardEvent<HTMLInputElement>) => {
     event.preventDefault();
-    if (["Control", "Shift", "Alt", "Meta"].includes(event.key)) return;
+    if (event.nativeEvent.isComposing || ["Control", "Shift", "Alt", "Meta", "Dead", "Process"].includes(event.key)) return;
     const parts = [
       event.ctrlKey && "Ctrl",
       event.shiftKey && "Shift",
       event.altKey && "Alt",
       event.metaKey && "Win",
-      event.key.length === 1 ? event.key.toUpperCase() : event.key,
+      event.key === " " ? "Space" : event.key === "+" ? "Plus" : event.key.length === 1 ? event.key.toUpperCase() : event.key,
     ].filter(Boolean);
     onChange(parts.join("+"));
   };
@@ -27,7 +27,7 @@ export function ShortcutRecorder({ value, onChange }: ShortcutRecorderProps) {
         readOnly
         onKeyDown={record}
       />
-      <small>按 Windows 常用写法输入；保存后由桌面端执行。</small>
+      <small>按下完整组合键后自动生效。</small>
     </label>
   );
 }

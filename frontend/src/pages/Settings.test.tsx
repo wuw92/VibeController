@@ -1,9 +1,17 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Rc901aControl, Rc901aInputStatus } from "../app/types";
-import { Settings, type SettingsValues } from "./Settings";
+import { Settings as HostSettings, type SettingsValues } from "./Settings";
 
 afterEach(cleanup);
+
+
+const hostSettings: SettingsValues = { controllerType: "xbox", codexOnly: true, startWithWindows: false,
+  deadZone: 0.18, mouseSpeed: 50, scrollSpeed: 50, activeControllerIndex: 0,
+  dictationShortcut: "Ctrl+Alt+Shift+F12", codexLightbarEnabled: false };
+function Settings(props: React.ComponentProps<typeof HostSettings>) {
+  return <HostSettings initialValues={hostSettings} {...props} />;
+}
 
 const verifiedControls: readonly Rc901aControl[] = [
   "remoteUp",
@@ -61,25 +69,23 @@ describe("Settings", () => {
       onSave={onSave} onCopyDiagnostics={onCopyDiagnostics} />);
     fireEvent.click(screen.getByLabelText("PS5 DualSense"));
     fireEvent.click(screen.getByLabelText("登录 Windows 后自动启动"));
-    fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
     const submitted = { ...persisted, controllerType: "playStation5", startWithWindows: true };
     expect(onSave).toHaveBeenLastCalledWith(submitted);
 
     // App retains the old controller type until the host confirms it.
     rerender(<Settings initialValues={{ ...persisted, startWithWindows: true }}
-      onSave={onSave} onCopyDiagnostics={onCopyDiagnostics} />);
+      onSave={onSave} onCopyDiagnostics={onCopyDiagnostics} saveStatus={{ state: "applying" }} />);
     expect(screen.getByLabelText("PS5 DualSense")).toBeChecked();
     fireEvent.change(screen.getByLabelText("鼠标速度"), { target: { value: "91" } });
-    rerender(<Settings initialValues={{ ...submitted, controllerType: "playStation5" }}
+    rerender(<Settings initialValues={{ ...submitted, controllerType: "playStation5" }} saveStatus={{ state: "applying" }}
       onSave={onSave} onCopyDiagnostics={onCopyDiagnostics} />);
     expect(screen.getByLabelText("鼠标速度")).toHaveValue("91");
     expect(screen.getByLabelText("PS5 DualSense")).toBeChecked();
 
-    rerender(<Settings initialValues={{ ...submitted, controllerType: "playStation5" }}
+    rerender(<Settings initialValues={{ ...submitted, controllerType: "playStation5" }} saveStatus={{ state: "applying" }}
       onSave={onSave} onCopyDiagnostics={onCopyDiagnostics}
       codexActivity={{ state: "working", lastEventAt: null, activeSessionCount: 1 }} />);
     expect(screen.getByLabelText("鼠标速度")).toHaveValue("91");
-    fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
     expect(onSave).toHaveBeenLastCalledWith({ ...submitted, mouseSpeed: 91 });
   });
 
@@ -98,10 +104,9 @@ describe("Settings", () => {
     expect(screen.getByLabelText("鼠标速度")).toHaveValue("73");
 
     fireEvent.click(screen.getByLabelText("Xbox 无线手柄"));
-    rerender(<Settings initialValues={{ ...persisted }} onSave={onSave} onCopyDiagnostics={onCopyDiagnostics}
+    rerender(<Settings initialValues={{ ...persisted }} saveStatus={{ state: "applying" }} onSave={onSave} onCopyDiagnostics={onCopyDiagnostics}
       codexActivity={{ state: "working", lastEventAt: null, activeSessionCount: 1 }} />);
     expect(screen.getByLabelText("Xbox 无线手柄")).toBeChecked();
-    fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
     expect(onSave).toHaveBeenCalledWith({ ...persisted, controllerType: "xbox" });
     rerender(<Settings initialValues={{ ...persisted, controllerType: "xbox" }}
       onSave={onSave} onCopyDiagnostics={onCopyDiagnostics} />);
@@ -125,7 +130,6 @@ describe("Settings", () => {
     render(<Settings onSave={onSave} onCopyDiagnostics={vi.fn()} />);
 
     fireEvent.click(screen.getByLabelText("PS5 DualSense"));
-    fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
 
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
       controllerType: "playStation5",
@@ -141,7 +145,6 @@ describe("Settings", () => {
     expect(screen.queryByLabelText("活动控制器")).not.toBeInTheDocument();
     expect(screen.getByText("Windows HID")).toBeInTheDocument();
     expect(screen.queryByText("直接 BLE 模式")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
       controllerType: "tclRc901a",
     }));
@@ -255,7 +258,7 @@ describe("Settings", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "兼容性按键识别" }));
-    expect(screen.getByText("先保存设备设置")).toBeInTheDocument();
+    expect(screen.getByText("正在切换设备，请稍候")).toBeInTheDocument();
     const learnMic = screen.getByRole("button", { name: "识别麦克风键" });
     expect(learnMic).toBeDisabled();
     fireEvent.click(learnMic);
@@ -298,7 +301,6 @@ describe("Settings", () => {
     fireEvent.click(screen.getByLabelText("登录 Windows 后自动启动"));
     fireEvent.change(screen.getByLabelText("摇杆死区"), { target: { value: "22" } });
     fireEvent.change(screen.getByLabelText("活动控制器"), { target: { value: "2" } });
-    fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
 
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
       codexOnly: false,
@@ -351,7 +353,6 @@ describe("Settings", () => {
     );
 
     fireEvent.click(screen.getByLabelText("使用 DualSense 灯条显示 Codex 状态"));
-    fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
 
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
       codexLightbarEnabled: true,
@@ -385,7 +386,6 @@ describe("Settings", () => {
 
     expect(screen.getByText("Hook 已安装 · 等待操作")).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText("使用 DualSense 灯条显示 Codex 状态"));
-    fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
       codexLightbarEnabled: false,
     }));

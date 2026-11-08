@@ -62,6 +62,7 @@ public sealed class ControllerRuntimeServiceConfigurationTests
         Assert.Equal(AgentTarget.DeepSeekHarness, configuration.ActiveAgent);
         Assert.Equal("shortcut:Ctrl+J", configuration.Mappings["x"]);
         Assert.Equal("dictation", configuration.AgentMappings!["codex"]["x"]);
+        await service.FlushSettingsAsync();
         Assert.Equal("J", store.Settings.DeepSeekHarnessProfile.Mappings[ControllerControl.X].Shortcut!.Key);
 
         foreground.Agent = AgentTarget.Codex;
@@ -156,7 +157,8 @@ public sealed class ControllerRuntimeServiceConfigurationTests
 
         Assert.Same(runtime, GetField<ControllerRuntime>(service, "_runtime"));
         Assert.False(adapter.Disposed);
-        Assert.Equal(2, store.SaveCount);
+        await service.FlushSettingsAsync();
+        Assert.Equal(1, store.SaveCount);
         var defaults = DefaultProfileFactory.Create().Mappings.ToDictionary(
             pair => pair.Key, pair => MappedActionCodec.Format(pair.Value));
         Assert.Equal(defaults, store.Settings.Profile.Mappings.ToDictionary(
@@ -180,7 +182,10 @@ public sealed class ControllerRuntimeServiceConfigurationTests
         PublishTick(service, now.AddMilliseconds(250), 1);
 
         Assert.Equal(2, messages.Count);
-        Assert.Equal(messages[0], messages[1]);
+        using var first = JsonDocument.Parse(messages[0]);
+        using var reset = JsonDocument.Parse(messages[1]);
+        Assert.Equal(first.RootElement.GetProperty("payload").GetProperty("configuration").GetProperty("mappings").GetRawText(),
+            reset.RootElement.GetProperty("payload").GetProperty("configuration").GetProperty("mappings").GetRawText());
     }
 
     [Fact]

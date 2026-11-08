@@ -22,6 +22,13 @@ beforeEach(() => vi.clearAllMocks());
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe("useRuntimeState", () => {
+  it("does not let an older queued configuration undo an accepted change", async () => {
+    const { mergeRuntimeUpdate } = await import("./useRuntimeState");
+    const current = { configuration: { ...configuration, revision: 2, mouseSpeed: 80 } };
+    expect(mergeRuntimeUpdate(current, { configuration: { revision: 1, mouseSpeed: 40 } }).configuration?.mouseSpeed).toBe(80);
+    expect(mergeRuntimeUpdate(current, { configuration: { scrollSpeed: 55 } }).configuration?.scrollSpeed).toBe(55);
+  });
+
   it("requests the persisted runtime state after subscribing", () => {
     renderHook(() => useRuntimeState());
 

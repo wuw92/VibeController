@@ -144,6 +144,7 @@ export interface RuntimeStatePayload {
 }
 
 export interface RuntimeConfiguration {
+  revision?: number;
   controllerType: ControllerType;
   activeControllerIndex: number;
   codexOnly: boolean;
@@ -174,7 +175,20 @@ export type RuntimeStateUpdate = Partial<Omit<RuntimeStatePayload, "configuratio
   configuration?: Partial<RuntimeConfiguration> | null;
 };
 
-export type HostMessage = RuntimeStateMessage;
+export interface CommandResult {
+  requestId: string;
+  succeeded: boolean;
+  configuration: RuntimeConfiguration;
+  error: string | null;
+}
+
+export interface AutoSaveStatus {
+  state: "idle" | "applying" | "error";
+  error?: string;
+}
+
+export type HostMessage = RuntimeStateMessage | { version: 1; type: "commandResult"; payload: CommandResult }
+  | { version: 1; type: "settingsPersistence"; payload: { error: string | null } };
 
 export type CommandType =
   | "setMappingEnabled"
@@ -196,4 +210,5 @@ export interface BridgeCommand<TPayload = unknown> {
   version: 1;
   type: CommandType;
   payload: TPayload;
+  requestId?: string;
 }

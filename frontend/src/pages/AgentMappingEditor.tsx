@@ -1,14 +1,15 @@
 import { useState } from "react";
-import type { AgentTarget, RuntimeConfiguration } from "../app/types";
+import type { AgentTarget, AutoSaveStatus, RuntimeConfiguration } from "../app/types";
 import { MappingEditor, type MappingValues } from "./MappingEditor";
 
 interface AgentMappingEditorProps {
   configuration?: RuntimeConfiguration;
   onSave(agent: AgentTarget, mappings: MappingValues): void;
   onReset(agent: AgentTarget): void;
+  saveStatus?: Record<string, AutoSaveStatus>;
 }
 
-export function AgentMappingEditor({ configuration, onSave, onReset }: AgentMappingEditorProps) {
+export function AgentMappingEditor({ configuration, onSave, onReset, saveStatus }: AgentMappingEditorProps) {
   const [agent, setAgent] = useState<AgentTarget>("codex");
   const [visited, setVisited] = useState<AgentTarget[]>(["codex"]);
   const selectAgent = (target: AgentTarget) => {
@@ -17,6 +18,7 @@ export function AgentMappingEditor({ configuration, onSave, onReset }: AgentMapp
   };
   return <>{visited.map((target) => <div key={target} hidden={target !== agent} role="group" aria-label={`${target} 映射`}>
     <MappingEditor agent={target} onAgentChange={selectAgent}
+      saveStatus={saveStatus?.[target]}
       controllerType={configuration?.controllerType} codexOnly={configuration?.codexOnly}
       shortcutOptions={configuration?.agentShortcuts?.[target]}
       initialValues={configuration?.agentMappings?.[target] ?? (target === "codex" ? configuration?.mappings : undefined)}

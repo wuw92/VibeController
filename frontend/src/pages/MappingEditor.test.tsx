@@ -41,97 +41,46 @@ describe("MappingEditor", () => {
     expect(screen.getByRole("region", { name: "当前生效快捷键" })).toHaveTextContent("Ctrl+Shift+Enter");
   });
 
-  it("confirms saving only after the host acknowledges the submitted profile", () => {
-    const props = { onSave: vi.fn(), onReset: vi.fn() };
-    const { rerender } = render(<HostMappingEditor {...props} initialValues={{ x: "send" }} />);
-    fireEvent.click(screen.getByRole("button", { name: "保存映射" }));
-    expect(screen.getByText("正在保存…")).toBeInTheDocument();
-    expect(screen.queryByText("映射已保存")).not.toBeInTheDocument();
-    rerender(<HostMappingEditor {...props} initialValues={{ x: "send" }} />);
-    expect(screen.getByText("映射已保存")).toBeInTheDocument();
-  });
-
-  it("requires a recorded key before saving a custom shortcut", () => {
-    render(<HostMappingEditor onSave={vi.fn()} onReset={vi.fn()} initialValues={{ x: "send" }} />);
-    fireEvent.change(screen.getByLabelText("绑定操作"), { target: { value: "keyboardShortcut" } });
-    expect(screen.getByRole("button", { name: "保存映射" })).toBeDisabled();
-    fireEvent.keyDown(screen.getByLabelText("自定义快捷键"), { key: "K", ctrlKey: true });
-    expect(screen.getByRole("button", { name: "保存映射" })).toBeEnabled();
-  });
-
-  it("preserves edits made after submission when a delayed save acknowledgement arrives", () => {
+  it("applies an operation change automatically without save feedback", () => {
     const onSave = vi.fn();
-    const onReset = vi.fn();
-    const { rerender } = render(<HostMappingEditor initialValues={{ x: "dictation" }}
-      onSave={onSave} onReset={onReset} />);
+    render(<HostMappingEditor initialValues={{ x: "dictation" }} onSave={onSave} onReset={vi.fn()} />);
     fireEvent.change(screen.getByLabelText("绑定操作"), { target: { value: "send" } });
-    fireEvent.click(screen.getByRole("button", { name: "保存映射" }));
     expect(onSave).toHaveBeenLastCalledWith({ x: "send" });
-    fireEvent.change(screen.getByLabelText("绑定操作"), { target: { value: "commandPalette" } });
-
-    rerender(<HostMappingEditor initialValues={{ x: "send" }} onSave={onSave} onReset={onReset} />);
-    expect(screen.getByLabelText("绑定操作")).toHaveValue("commandPalette");
-    fireEvent.click(screen.getByRole("button", { name: "保存映射" }));
-    expect(onSave).toHaveBeenLastCalledWith({ x: "commandPalette" });
-
-    // Reset is authoritative even while a newer save acknowledgement is pending.
-    fireEvent.click(screen.getByRole("button", { name: "恢复默认" }));
-    rerender(<HostMappingEditor initialValues={{ x: "dictation" }} onSave={onSave} onReset={onReset} />);
-    expect(screen.getByLabelText("绑定操作")).toHaveValue("dictation");
+    expect(screen.queryByRole("button", { name: "保存映射" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/正在保存|已保存|正在应用/)).not.toBeInTheDocument();
   });
 
-  it("preserves a newer recorded shortcut through an older save acknowledgement", () => {
+  it("only applies a custom binding after a complete key is recorded", () => {
     const onSave = vi.fn();
-    const onReset = vi.fn();
-    const { rerender } = render(<HostMappingEditor initialValues={{ x: "shortcut:Ctrl+K" }}
-      onSave={onSave} onReset={onReset} />);
-    fireEvent.keyDown(screen.getByLabelText("自定义快捷键"), { key: "A", ctrlKey: true });
-    fireEvent.click(screen.getByRole("button", { name: "保存映射" }));
-    fireEvent.keyDown(screen.getByLabelText("自定义快捷键"), { key: "B", ctrlKey: true });
-    rerender(<HostMappingEditor initialValues={{ x: "shortcut:Ctrl+A" }}
-      onSave={onSave} onReset={onReset} />);
-    expect(screen.getByLabelText("自定义快捷键")).toHaveValue("Ctrl+B");
-    fireEvent.click(screen.getByRole("button", { name: "保存映射" }));
-    expect(onSave).toHaveBeenLastCalledWith({ x: "shortcut:Ctrl+B" });
+    render(<HostMappingEditor initialValues={{ x: "send" }} onSave={onSave} onReset={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText("绑定操作"), { target: { value: "keyboardShortcut" } });
+    expect(onSave).not.toHaveBeenCalled();
+    fireEvent.keyDown(screen.getByLabelText("自定义快捷键"), { key: "K", ctrlKey: true });
+    expect(onSave).toHaveBeenLastCalledWith({ x: "shortcut:Ctrl+K" });
   });
 
-  it("does not invent defaults or permit saving before the host configuration arrives", () => {
+  it("does not replace newer edits while their change is being processed", () => {
+    const props = { onSave: vi.fn(), onReset: vi.fn() };
+    const { rerender } = render(<HostMappingEditor {...props} initialValues={{ x: "dictation" }} />);
+    fireEvent.change(screen.getByLabelText("绑定操作"), { target: { value: "send" } });
+    fireEvent.change(screen.getByLabelText("绑定操作"), { target: { value: "commandPalette" } });
+    rerender(<HostMappingEditor {...props} initialValues={{ x: "send" }} saveStatus={{ state: "applying" }} />);
+    expect(screen.getByLabelText("绑定操作")).toHaveValue("commandPalette");
+    expect(props.onSave).toHaveBeenLastCalledWith({ x: "commandPalette" });
+  });
+
+  it("waits for host configuration before enabling edits", () => {
     const onSave = vi.fn();
     render(<HostMappingEditor onSave={onSave} onReset={vi.fn()} />);
-    expect(screen.getByRole("button", { name: "保存映射" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "恢复默认" })).toBeDisabled();
     expect(screen.getByLabelText("绑定操作")).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "保存映射" }));
+    expect(screen.getByRole("button", { name: "恢复默认" })).toBeDisabled();
     expect(onSave).not.toHaveBeenCalled();
   });
 
-  it("waits for authoritative reset values and preserves edits through unchanged config refreshes", () => {
-    const onSave = vi.fn();
-    const onReset = vi.fn();
-    const { rerender } = render(<HostMappingEditor
-      initialValues={{ x: "send" }} onSave={onSave} onReset={onReset} />);
-    fireEvent.change(screen.getByLabelText("绑定操作"), { target: { value: "commandPalette" } });
-    rerender(<HostMappingEditor initialValues={{ x: "send" }} onSave={onSave} onReset={onReset} />);
-    expect(screen.getByLabelText("绑定操作")).toHaveValue("commandPalette");
-    fireEvent.click(screen.getByRole("button", { name: "恢复默认" }));
-    expect(screen.getByRole("button", { name: "保存映射" })).toBeDisabled();
-    rerender(<HostMappingEditor initialValues={{ x: "send" }} onSave={onSave} onReset={onReset} />);
-    expect(screen.getByLabelText("绑定操作")).toHaveValue("send");
-    fireEvent.click(screen.getByRole("button", { name: "保存映射" }));
-    expect(onSave).toHaveBeenCalledWith({ x: "send" });
-    expect(onReset).toHaveBeenCalledOnce();
-  });
-
-  it("selects a control and changes its action", () => {
-    const onSave = vi.fn();
-    render(<MappingEditor onSave={onSave} onReset={vi.fn()} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "X 按键" }));
-    fireEvent.change(screen.getByLabelText("绑定操作"), { target: { value: "commandPalette" } });
-    fireEvent.click(screen.getByRole("button", { name: "保存映射" }));
-
-    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ x: "commandPalette" }));
-    expect(screen.getByText("正在保存…")).toBeInTheDocument();
+  it("shows real application errors without a normal saving workflow", () => {
+    render(<HostMappingEditor initialValues={{ x: "send" }} onSave={vi.fn()} onReset={vi.fn()}
+      saveStatus={{ state: "error", error: "无效快捷键" }} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("无效快捷键");
   });
 
   it("warns when two controls use the same exclusive shortcut", () => {
@@ -154,7 +103,6 @@ describe("MappingEditor", () => {
     render(<MappingEditor onSave={onSave} onReset={vi.fn()} />);
     fireEvent.change(screen.getByLabelText("绑定操作"), { target: { value: "keyboardShortcut" } });
     fireEvent.keyDown(screen.getByLabelText("自定义快捷键"), { key: "K", ctrlKey: true, shiftKey: true });
-    fireEvent.click(screen.getByRole("button", { name: "保存映射" }));
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ x: "shortcut:Ctrl+Shift+K" }));
   });
 
@@ -170,7 +118,7 @@ describe("MappingEditor", () => {
     expect(screen.queryByRole("option", { name: "上一个模型" })).not.toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "下一个模型" })).not.toBeInTheDocument();
     expect(screen.getByRole("option", { name: "取消 / 返回" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "保存映射" }));
+    fireEvent.change(screen.getByLabelText("绑定操作"), { target: { value: "dictation" } });
 
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
       b: "shortcut:Backspace",
@@ -214,9 +162,9 @@ describe("MappingEditor", () => {
     expect(screen.getByRole("option", { name: "上一个标签页" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "下一个标签页" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "保存映射" }));
+    fireEvent.change(screen.getByLabelText("绑定操作"), { target: { value: "dictation" } });
 
-    const saved = onSave.mock.calls[0][0] as Record<string, string>;
+    const saved = onSave.mock.calls.at(-1)![0] as Record<string, string>;
     expect(saved.leftShoulder).toBe("previousChat");
     expect(saved.rightShoulder).toBe("nextChat");
     expect(Object.values(saved)).not.toContain("previousRecentThread");
@@ -247,7 +195,7 @@ describe("MappingEditor", () => {
     expect(screen.getByRole("button", { name: "触控板纵向滑动" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "触控板按下" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "保存映射" }));
+    fireEvent.change(screen.getByLabelText("绑定操作"), { target: { value: "dictation" } });
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
       touchpadX: "mouseMove",
       touchpadY: "mouseMove",
@@ -281,9 +229,10 @@ describe("MappingEditor", () => {
     expect(screen.queryByRole("button", { name: "爱奇艺键" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "频道 +" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "数字键 0" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "保存映射" }));
+    fireEvent.click(screen.getByRole("button", { name: "麦克风键" }));
+    fireEvent.change(screen.getByLabelText("绑定操作"), { target: { value: "dictation" } });
 
-    const saved = onSave.mock.calls[0][0] as Record<string, string>;
+    const saved = onSave.mock.calls.at(-1)![0] as Record<string, string>;
     expect(saved).toEqual(expect.objectContaining({
       remoteOk: "send",
       remoteBack: "shortcut:Backspace",

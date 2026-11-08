@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, RotateCcw, Save } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { AlertTriangle, RotateCcw } from "lucide-react";
 import { ActionPicker } from "../components/ActionPicker";
 import { codexShortcutActions, getMappingDisplay } from "../app/mappingActions";
+import { AutoSaveFeedback } from "../components/AutoSaveFeedback";
 import { ShortcutRecorder } from "../components/ShortcutRecorder";
 import { getControllerPresentation } from "../app/controllerPresentation";
-import type { AgentShortcutOption, AgentTarget, ControllerType } from "../app/types";
+import type { AgentShortcutOption, AgentTarget, AutoSaveStatus, ControllerType } from "../app/types";
 
 export type MappingValues = Record<string, string>;
 
@@ -25,10 +26,11 @@ interface MappingEditorProps {
   onSave(values: MappingValues): void;
   onReset(): void;
   initialValues?: MappingValues;
+  saveStatus?: AutoSaveStatus;
 }
 
 export function MappingEditor({ agent = "codex", shortcutOptions, onAgentChange, codexOnly,
-  controllerType = "xbox", onSave, onReset, initialValues }: MappingEditorProps) {
+  controllerType = "xbox", onSave, onReset, initialValues, saveStatus }: MappingEditorProps) {
   const presentation = getControllerPresentation(controllerType);
   const controls = presentation.controls;
   const incoming = initialValues ?? {};
@@ -38,37 +40,15 @@ export function MappingEditor({ agent = "codex", shortcutOptions, onAgentChange,
   useEffect(() => setSelected(controls[0]?.key ?? "x"), [controls]);
   const [values, setValues] = useState(incomingActions);
   const [shortcuts, setShortcuts] = useState(incomingShortcuts);
-  const [saved, setSaved] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [resetting, setResetting] = useState(false);
-  const draftRevision = useRef(0);
-  const submissions = useRef<{ snapshot: string; revision: number }[]>([]);
   const serializedIncoming = serializeMappings(incoming);
-  const lastIncoming = useRef<string | undefined>(undefined);
   useEffect(() => {
-    const acknowledgedIndex = submissions.current
-      .map((submission) => submission.snapshot).lastIndexOf(serializedIncoming);
-    if (acknowledgedIndex >= 0) {
-      const acknowledged = submissions.current[acknowledgedIndex];
-      submissions.current.splice(0, acknowledgedIndex + 1);
-      setSaving(false);
-      setSaved(draftRevision.current === acknowledged.revision);
-      if (!resetting && draftRevision.current > acknowledged.revision) {
-        lastIncoming.current = serializedIncoming;
-        return;
-      }
-    }
-    if (lastIncoming.current === serializedIncoming && !resetting) return;
-    lastIncoming.current = serializedIncoming;
+    if (saveStatus?.state === "applying") return;
     const mappings = JSON.parse(serializedIncoming) as MappingValues;
     setValues(Object.fromEntries(Object.entries(mappings).map(([key, value]) =>
       [key, value.startsWith("shortcut:") ? "keyboardShortcut" : value])));
-    setShortcuts(Object.fromEntries(Object.entries(mappings)
-      .filter(([, value]) => value.startsWith("shortcut:"))
+    setShortcuts(Object.fromEntries(Object.entries(mappings).filter(([, value]) => value.startsWith("shortcut:"))
       .map(([key, value]) => [key, value.slice(9)])));
-    if (acknowledgedIndex < 0) setSaved(false);
-    setResetting(false);
-  }, [serializedIncoming, initialValues]);
+  }, [serializedIncoming, saveStatus?.state]);
   const selectedControl = controls.find((control) => control.key === selected);
   const selectedLabel = selectedControl?.label ?? selected;
   const conflict = useMemo(() => {
@@ -79,32 +59,23 @@ export function MappingEditor({ agent = "codex", shortcutOptions, onAgentChange,
   }, [selected, values]);
   const mappings = Object.fromEntries(Object.entries(values).map(([key, value]) =>
     [key, value === "keyboardShortcut" ? `shortcut:${shortcuts[key] ?? ""}` : value]));
-  const dirty = serializeMappings(mappings) !== serializedIncoming;
   const incompleteShortcut = Object.entries(values).some(([key, value]) => value === "keyboardShortcut" && !shortcuts[key]);
   const display = getMappingDisplay(mappings[selected], shortcutOptions);
   const agentName = agent === "codex" ? "Codex" : "DeepSeek Harness";
   const hasAppShortcut = codexShortcutActions.has(values[selected]) || values[selected]?.startsWith("deepseek:") || values[selected] === "cancel";
 
   const changeAction = (action: string) => {
-    draftRevision.current++;
     setValues((current) => ({ ...current, [selected]: action }));
-    setSaved(false);
-  };
-
-  const saveMapping = () => {
-    submissions.current.push({ snapshot: serializeMappings(mappings), revision: draftRevision.current });
-    setSaving(true);
-    onSave(mappings);
-    setSaved(false);
+    if (action !== "keyboardShortcut" || shortcuts[selected])
+      onSave({ ...mappings, [selected]: action === "keyboardShortcut" ? `shortcut:${shortcuts[selected]}` : action });
   };
 
   return (
     <main className="workspace-page mapping-page">
       <header className="page-heading">
-        <div><p className="eyebrow">Input map</p><h1>按键映射</h1><p>选择按键，再绑定应用操作或键鼠输入。</p></div>
+        <div><p className="eyebrow">Input map</p><h1>按键映射</h1><p>选择按键并修改绑定，修改后即生效。</p></div>
         <div className="page-actions">
-          <button className="quiet-button" type="button" disabled={!initialValues || resetting} onClick={() => { submissions.current = []; setResetting(true); setSaved(false); setSaving(false); onReset(); }}><RotateCcw size={15}/>恢复默认</button>
-          <button className="primary-button" type="button" disabled={!initialValues || resetting || incompleteShortcut} onClick={saveMapping}><Save size={15}/>保存映射</button>
+          <button className="quiet-button" type="button" disabled={!initialValues || saveStatus?.state === "applying"} onClick={onReset}><RotateCcw size={15}/>恢复默认</button>
         </div>
       </header>
 
@@ -115,13 +86,11 @@ export function MappingEditor({ agent = "codex", shortcutOptions, onAgentChange,
           </select>
         </label>}
         <p className="mapping-mode">{codexOnly === false ? "全局模式：始终使用 Codex 映射。" : "自动识别前台应用，使用对应 Agent 的映射。"}</p>
-        <span className="mapping-save-status" data-state={saved ? "saved" : "idle"} role="status">
-          {resetting ? "正在恢复默认…" : saving ? "正在保存…" : dirty ? "有未保存的更改" : saved ? "映射已保存" : ""}
-        </span>
+        <AutoSaveFeedback status={saveStatus} />
       </div>
 
       {!initialValues && <p role="status">等待主机配置；映射编辑暂不可用。</p>}
-      <fieldset className="editor-grid" disabled={!initialValues || resetting}>
+      <fieldset className="editor-grid" disabled={!initialValues}>
         <section className="mapping-list" aria-label={`${presentation.statusName}按键列表`}>
           {controls.map(({ key, label, keycap }) => {
             const mapping = getMappingDisplay(mappings[key], shortcutOptions);
@@ -142,9 +111,9 @@ export function MappingEditor({ agent = "codex", shortcutOptions, onAgentChange,
             <kbd>{display.shortcut ?? (display.message ? "未绑定或不可用" : "正在读取…")}</kbd>
             <p>{display.message ?? (values[selected] === "cancel" ? "键盘固定操作。" : `由 ${agentName} 管理，设置变化后自动同步。`)}</p>
           </section>}
-          {values[selected] === "keyboardShortcut" && <ShortcutRecorder value={shortcuts[selected] ?? ""} onChange={(shortcut) => { draftRevision.current++; setShortcuts((current) => ({ ...current, [selected]: shortcut })); setSaved(false); }} />}
+          {values[selected] === "keyboardShortcut" && <ShortcutRecorder value={shortcuts[selected] ?? ""} onChange={(shortcut) => { setShortcuts((current) => ({ ...current, [selected]: shortcut })); onSave({ ...mappings, [selected]: `shortcut:${shortcut}` }); }} />}
           <div className="mapping-preview"><span>触发结果</span><strong>{display.label}</strong></div>
-          {incompleteShortcut && <p className="inline-warning"><AlertTriangle size={16}/>请先录入自定义快捷键，再保存映射。</p>}
+          {incompleteShortcut && <p className="inline-warning"><AlertTriangle size={16}/>录入完整快捷键后自动生效。</p>}
           {conflict && <p className="inline-warning" role="alert"><AlertTriangle size={16}/>与 {conflict}冲突；实际使用时两个按键都会触发该操作。</p>}
         </section>
       </fieldset>

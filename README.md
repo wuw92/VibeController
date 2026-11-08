@@ -64,9 +64,9 @@ Windows 可能为该遥控器显示“驱动程序错误”。已确认这是 Wi
 
 ### Agent 映射
 
-当前源码支持 DeepSeek Harness 独立桌面应用。在 Input map 的“配置 Agent”中选择应用，再保存该应用的按键映射；恢复默认仅影响所选 Agent。切换 Agent 会保留页面内尚未保存的编辑。
+当前源码支持 DeepSeek Harness 独立桌面应用。在 Input map 的“配置 Agent”中选择应用，直接修改该应用的按键映射；恢复默认仅影响所选 Agent。修改即生效并自动保存，无需再点击保存按钮。
 
-两个 Agent 使用相同的配置流程：下拉菜单只选择操作名称，当前生效的快捷键及默认、自定义或固定来源单独显示。启动时读取应用设置，配置变化后自动同步，无需手动刷新。保存得到主机确认后才显示成功，切换 Agent 或收到快捷键更新不会丢弃未保存的映射。
+两个 Agent 使用相同的配置流程：下拉菜单只选择操作名称，当前生效的快捷键及默认、自定义或固定来源单独显示。启动时读取应用设置，配置变化后自动同步，无需手动刷新。修改后立即应用，后台合并保存；正常操作不显示保存流程，只有真实异常才提示。关闭应用时会完成待写入的设置。
 
 常用操作与键位读取见 [CodexShortcutResolver](src/VibeController.Infrastructure/Windows/CodexShortcutResolver.cs)、[DeepSeekShortcutResolver](src/VibeController.Infrastructure/Windows/DeepSeekShortcutResolver.cs)；DSH 命令目录以 [DeepSeekShortcutCatalog](src/VibeController.Infrastructure/Windows/DeepSeekShortcutCatalog.cs) 为准。手柄默认映射见 [DefaultProfileFactory](src/VibeController.Core/Mapping/DefaultProfileFactory.cs)，前台识别见 [窗口服务](src/VibeController.Infrastructure/Windows/CodexWindowService.cs)。既有映射保留。
 
@@ -214,7 +214,7 @@ The v1.1.0 binaries are currently unsigned, so Windows SmartScreen may warn. Dow
 
 ### Codex shortcut synchronization
 
-Select an agent and an operation in Input map; the effective shortcut and its source appear separately from the operation menu. Both agents load shortcuts at startup and follow configuration changes automatically. Custom application bindings override defaults. See [CodexShortcutResolver](src/VibeController.Infrastructure/Windows/CodexShortcutResolver.cs) and [DeepSeekShortcutResolver](src/VibeController.Infrastructure/Windows/DeepSeekShortcutResolver.cs) for the authoritative configuration entry points.
+Changes apply immediately and persist automatically in the background. Select an agent and an operation in Input map; the effective shortcut and its source appear separately from the operation menu. Both agents load shortcuts at startup and follow configuration changes automatically. Custom application bindings override defaults. See [CodexShortcutResolver](src/VibeController.Infrastructure/Windows/CodexShortcutResolver.cs) and [DeepSeekShortcutResolver](src/VibeController.Infrastructure/Windows/DeepSeekShortcutResolver.cs) for the authoritative configuration entry points.
 
 If an action is explicitly unbound, has no Codex default, or uses an unsupported accelerator format, VibeController reports the problem instead of injecting a stale fallback. Codex commonly has no default binding for **Toggle Dictation** or **Increase/Decrease Reasoning Effort**; bind those actions once under **Codex → Settings → Keyboard Shortcuts**. Each user may choose different combinations.
 

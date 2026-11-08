@@ -30,7 +30,7 @@ export function mergeRuntimeUpdate(
   return {
     ...current,
     ...runtime,
-    ...(configuration ? {
+    ...(configuration && (configuration.revision ?? current.configuration?.revision ?? 0) >= (current.configuration?.revision ?? 0) ? {
       configuration: { ...current.configuration, ...configuration },
     } : {}),
   };
@@ -47,6 +47,7 @@ export function useRuntimeState() {
     let pending: RuntimeStateUpdate | undefined;
     let frame: number | undefined;
     const unsubscribe = appBridge.subscribe((message) => {
+      if (message.type !== "runtimeState") return;
       pending = mergeRuntimeUpdate(pending ?? {}, message.payload);
       if (frame !== undefined) return;
       frame = window.requestAnimationFrame(() => {

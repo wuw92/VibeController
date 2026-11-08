@@ -1,4 +1,4 @@
-using System.Reflection;
+using System.Text.Json.Serialization;
 using System.Text.Json;
 using VibeController.App.Services;
 using VibeController.Core.Domain;
@@ -19,8 +19,8 @@ public sealed class ConfigurationAutosaveTests
             payload = new { agent = "codex", mappings = new { x = "shortcut:F8", a = "shortcut:F9" } } }));
         await service.HandleCommandAsync(JsonSerializer.Serialize(new { version = 1, type = "resetDefaults",
             payload = new { agent = "codex", control = "x" } }));
-        Assert.Equal("dictation", Configuration(service).Mappings["x"]);
-        Assert.Equal("shortcut:F9", Configuration(service).Mappings["a"]);
+        Assert.Equal("dictation", (await Configuration(service)).Mappings["x"]);
+        Assert.Equal("shortcut:F9", (await Configuration(service)).Mappings["a"]);
     }
 
     [Fact]
@@ -31,9 +31,9 @@ public sealed class ConfigurationAutosaveTests
         var replies = new List<string>();
         service.StateJsonReady += replies.Add;
         await Change(service, "one", "send");
-        Assert.Equal("send", Configuration(service).Mappings["x"]);
+        Assert.Equal("send", (await Configuration(service)).Mappings["x"]);
         Assert.Equal(0, store.Writes);
-        using var reply = JsonDocument.Parse(Assert.Single(replies));
+        using var reply = JsonDocument.Parse(replies.First());
         Assert.True(reply.RootElement.GetProperty("payload").GetProperty("succeeded").GetBoolean());
         await Change(service, "two", "none");
         await service.FlushSettingsAsync();
@@ -50,9 +50,9 @@ public sealed class ConfigurationAutosaveTests
         service.StateJsonReady += replies.Add;
         await Change(service, "one", "send");
         await service.FlushSettingsAsync();
-        Assert.Equal("send", Configuration(service).Mappings["x"]);
+        Assert.Equal("send", (await Configuration(service)).Mappings["x"]);
         Assert.Equal(MappedActionKind.CodexDictation, store.Settings.Profile.Mappings[ControllerControl.X].Kind);
-        using (var error = JsonDocument.Parse(replies.Last()))
+        using (var error = JsonDocument.Parse(replies.Last(value => value.Contains("settingsPersistence"))))
         {
             Assert.Equal("settingsPersistence", error.RootElement.GetProperty("type").GetString());
             Assert.Equal("disk_write_failed", error.RootElement.GetProperty("payload").GetProperty("error").GetString());
@@ -74,7 +74,7 @@ public sealed class ConfigurationAutosaveTests
         try
         {
             await Change(service, "two", "none").WaitAsync(TimeSpan.FromSeconds(1));
-            Assert.Equal("none", Configuration(service).Mappings["x"]);
+            Assert.Equal("none", (await Configuration(service)).Mappings["x"]);
         }
         finally { store.Release.TrySetResult(); }
         await service.FlushSettingsAsync();
@@ -91,15 +91,30 @@ public sealed class ConfigurationAutosaveTests
         await Change(service, "one", "shortcut:F99");
         using var result = JsonDocument.Parse(reply!);
         Assert.False(result.RootElement.GetProperty("payload").GetProperty("succeeded").GetBoolean());
-        Assert.Equal("dictation", Configuration(service).Mappings["x"]);
+        Assert.Equal("dictation", (await Configuration(service)).Mappings["x"]);
         Assert.Equal(0, store.Writes);
     }
 
     private static Task Change(ControllerRuntimeService service, string id, string action) =>
         service.HandleCommandAsync(JsonSerializer.Serialize(new { version = 1, type = "updateMapping", requestId = id,
             payload = new { agent = "codex", mappings = new { x = action } } }));
-    private static RuntimeConfigurationPayload Configuration(ControllerRuntimeService service) =>
-        (RuntimeConfigurationPayload)typeof(ControllerRuntimeService).GetMethod("BuildConfiguration", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(service, null)!;
+    private static async Task<RuntimeConfigurationPayload> Configuration(ControllerRuntimeService service)
+    {
+        string? reply = null;
+        void Receive(string json)
+        {
+            using var message = JsonDocument.Parse(json);
+            if (message.RootElement.GetProperty("type").GetString() == "commandResult") reply = json;
+        }
+        service.StateJsonReady += Receive;
+        try
+        {
+            await service.HandleCommandAsync(JsonSerializer.Serialize(new { version = 1, type = "requestState", requestId = "inspect", payload = new { } }));
+            var options = new JsonSerializerOptions(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } };
+            return JsonSerializer.Deserialize<BridgeMessage<CommandResultPayload>>(reply!, options)!.Payload.Configuration;
+        }
+        finally { service.StateJsonReady -= Receive; }
+    }
     private sealed class Foreground : IForegroundAppService { public bool IsCodexForeground() => true; }
     private sealed class Store : ISettingsStore
     {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { AppShell } from "./components/AppShell";
 import type { AppPage } from "./components/AppShell";
 import { Dashboard } from "./pages/Dashboard";
@@ -6,68 +6,13 @@ import { AgentMappingEditor } from "./pages/AgentMappingEditor";
 import { Settings } from "./pages/Settings";
 import { appBridge } from "./app/AppBridge";
 import { useRuntimeState } from "./app/useRuntimeState";
-import type { AgentTarget, AutoSaveStatus, CommandType } from "./app/types";
-import type { MappingValues } from "./pages/MappingEditor";
-import type { SettingsValues } from "./pages/Settings";
+import { useConfigurationChanges } from "./app/useConfigurationChanges";
 
 export default function App() {
   const [state, setState] = useRuntimeState();
   const [page, setPage] = useState<AppPage>("dashboard");
-  const [saveStatus, setSaveStatus] = useState<Record<string, AutoSaveStatus>>({});
-  const [persistenceError, setPersistenceError] = useState<string | null>(null);
-  useEffect(() => appBridge.subscribe((message) => {
-    if (message.type === "settingsPersistence") setPersistenceError(message.payload.error);
-  }), []);
-  const revision = useRef(0);
-  const latest = useRef<Record<string, number>>({});
-  const [resetUndo, setResetUndo] = useState<{ agent: AgentTarget; mappings: MappingValues } | null>(null);
-
-  const applyConfiguration = async (context: string, type: CommandType, payload: unknown) => {
-    const previous = state.configuration;
-    const current = ++revision.current;
-    latest.current[context] = current;
-    setSaveStatus((status) => ({ ...status, [context]: { state: "applying" } }));
-    try {
-      const result = await appBridge.request(type, payload);
-      if (current === revision.current)
-        setState((state) => ({ ...state, configuration: result.configuration }));
-      if (latest.current[context] === current)
-        setSaveStatus((status) => ({ ...status, [context]: result.succeeded
-          ? { state: "idle" } : { state: "error", error: result.error ?? "请重试" } }));
-      return result.succeeded;
-    } catch (error) {
-      if (current === revision.current && previous)
-        setState((state) => ({ ...state, configuration: previous }));
-      if (latest.current[context] === current)
-        setSaveStatus((status) => ({ ...status, [context]: { state: "error", error: String(error) } }));
-      return false;
-    }
-  };
-
-  const changeMapping = (agent: AgentTarget, mappings: MappingValues) => {
-    setResetUndo((undo) => undo?.agent === agent ? null : undo);
-    setState((state) => ({ ...state, configuration: state.configuration ? {
-      ...state.configuration,
-      revision: Number.POSITIVE_INFINITY,
-      agentMappings: { ...state.configuration.agentMappings!, [agent]: mappings },
-      mappings: (state.configuration.activeAgent ?? "codex") === agent ? mappings : state.configuration.mappings,
-    } : undefined }));
-    void applyConfiguration(agent, "updateMapping", { agent, mappings });
-  };
-
-  const resetMapping = async (agent: AgentTarget, control?: string) => {
-    const previous = state.configuration?.agentMappings?.[agent];
-    const request = revision.current + 1;
-    const succeeded = await applyConfiguration(agent, "resetDefaults", { agent, ...(control ? { control } : {}) });
-    if (succeeded && previous && latest.current[agent] === request) setResetUndo({ agent, mappings: previous });
-  };
-
-  const changeSettings = (settings: SettingsValues) => {
-    setState((state) => ({ ...state, configuration: state.configuration ? {
-      ...state.configuration, ...settings, revision: Number.POSITIVE_INFINITY, controllerType: state.configuration.controllerType,
-    } : undefined }));
-    void applyConfiguration("settings", "updateSettings", settings);
-  };
+  const { configuration, statuses, persistenceError, changeMapping, changeSettings, resetMapping,
+    undoResetAgent, undoReset } = useConfigurationChanges(state.configuration);
 
   const toggleMapping = (enabled: boolean) => {
     setState((current) => ({ ...current, mappingEnabled: enabled }));
@@ -82,40 +27,40 @@ export default function App() {
   return (
     <AppShell page={page} onNavigate={setPage}>
       {persistenceError && <p className="configuration-persistence-error" role="alert">更改已生效，但未能自动保存：{persistenceError}</p>}
-      {page === "dashboard" && <Dashboard state={state} onToggleMapping={toggleMapping} onToggleTestMode={toggleTestMode} onOpenMappings={() => setPage("mapping")} />}
+      {page === "dashboard" && <Dashboard state={{ ...state, configuration }} onToggleMapping={toggleMapping} onToggleTestMode={toggleTestMode} onOpenMappings={() => setPage("mapping")} />}
       {page === "mapping" && (
         <AgentMappingEditor
-          configuration={state.configuration}
-          saveStatus={saveStatus}
+          configuration={configuration}
+          saveStatus={statuses}
           onSave={changeMapping}
           onReset={(agent, control) => { void resetMapping(agent, control); }}
-          undoResetAgent={resetUndo?.agent}
-          onUndoReset={resetUndo ? () => changeMapping(resetUndo.agent, resetUndo.mappings) : undefined}
+          undoResetAgent={undoResetAgent}
+          onUndoReset={undoReset}
         />
       )}
       {page === "settings" && (
         <Settings
-          saveStatus={saveStatus.settings}
-          initialValues={state.configuration ? {
-            controllerType: state.configuration.controllerType,
-            activeControllerIndex: state.configuration.activeControllerIndex,
-            codexOnly: state.configuration.codexOnly,
-            dictationShortcut: state.configuration.dictationShortcut,
-            mouseSpeed: Math.round(state.configuration.mouseSpeed),
-            scrollSpeed: Math.round(state.configuration.scrollSpeed),
-            deadZone: state.configuration.deadZone,
-            startWithWindows: state.configuration.startWithWindows,
-            codexLightbarEnabled: state.configuration.codexLightbarEnabled ?? false,
+          saveStatus={statuses.settings}
+          initialValues={configuration ? {
+            controllerType: configuration.controllerType,
+            activeControllerIndex: configuration.activeControllerIndex,
+            codexOnly: configuration.codexOnly,
+            dictationShortcut: configuration.dictationShortcut,
+            mouseSpeed: Math.round(configuration.mouseSpeed),
+            scrollSpeed: Math.round(configuration.scrollSpeed),
+            deadZone: configuration.deadZone,
+            startWithWindows: configuration.startWithWindows,
+            codexLightbarEnabled: configuration.codexLightbarEnabled ?? false,
           } : undefined}
-          microphone={state.configuration?.microphone}
-          codexHook={state.configuration?.codexHook}
-          codexActivity={state.configuration?.codexActivity}
-          rc901a={state.configuration?.rc901a}
-          rc901aInput={state.configuration?.rc901aInput}
+          microphone={configuration?.microphone}
+          codexHook={configuration?.codexHook}
+          codexActivity={configuration?.codexActivity}
+          rc901a={configuration?.rc901a}
+          rc901aInput={configuration?.rc901aInput}
           persistedControllerType={state.configuration?.controllerType}
           rc901aLearningReady={
-            state.configuration?.rc901a?.connectionState === "connected" ||
-            state.configuration?.rc901a?.connectionState === "connectedLimited"
+            configuration?.rc901a?.connectionState === "connected" ||
+            configuration?.rc901a?.connectionState === "connectedLimited"
           }
           onSave={changeSettings}
           onRefreshIntegrations={() => appBridge.send("refreshIntegrations", {})}

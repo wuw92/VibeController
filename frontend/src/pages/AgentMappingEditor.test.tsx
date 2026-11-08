@@ -1,7 +1,8 @@
+import * as React from "react";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { RuntimeConfiguration } from "../app/types";
-import { AgentMappingEditor } from "./AgentMappingEditor";
+import { AgentMappingEditor as HostAgentMappingEditor } from "./AgentMappingEditor";
 
 afterEach(cleanup);
 
@@ -11,6 +12,14 @@ const configuration: RuntimeConfiguration = {
   startWithWindows: false, mappings: { x: "dictation" },
   agentMappings: { codex: { x: "dictation" }, deepSeekHarness: { x: "shortcut:Ctrl+J" } },
 };
+
+function AgentMappingEditor(props: React.ComponentProps<typeof HostAgentMappingEditor>) {
+  const [value, setValue] = React.useState(props.configuration);
+  return <HostAgentMappingEditor {...props} configuration={value} onSave={(agent, mappings) => {
+    setValue((previous) => previous ? { ...previous, agentMappings: { ...previous.agentMappings!, [agent]: mappings } } : previous);
+    props.onSave(agent, mappings);
+  }} />;
+}
 
 it("saves and resets the chosen agent and preserves both drafts while switching", () => {
   const onSave = vi.fn();
@@ -29,10 +38,11 @@ it("saves and resets the chosen agent and preserves both drafts while switching"
   fireEvent.change(screen.getByRole("combobox", { name: "配置 Agent" }), { target: { value: "deepSeekHarness" } });
   fireEvent.click(deepSeek.getByRole("button", { name: /重置.*全部映射/ }));
   expect(onReset).toHaveBeenLastCalledWith("deepSeekHarness");
-  rerender(<AgentMappingEditor configuration={{ ...configuration,
+  rerender(<HostAgentMappingEditor configuration={{ ...configuration,
     agentMappings: { codex: { x: "send" }, deepSeekHarness: { x: "none" } },
   }} onSave={onSave} onReset={onReset} />);
-  expect(deepSeek.getByLabelText("绑定操作")).toHaveValue("none");
+  fireEvent.change(screen.getByRole("combobox", { name: "配置 Agent" }), { target: { value: "deepSeekHarness" } });
+  expect(screen.getByLabelText("绑定操作")).toHaveValue("none");
 });
 
 it("explains that global mode uses Codex even while editing DeepSeek Harness", () => {
@@ -47,8 +57,8 @@ it("shows current DSH keys outside the menu and synchronizes without discarding 
     { value: "deepseek:fixed.send", label: "发送消息", shortcut: "Enter", source: "fixed" as const, message: null },
     { value: "deepseek:session.search", label: "搜索任务", shortcut: "Ctrl+K", source: "default" as const, message: null },
   ];
-  const loaded: RuntimeConfiguration = { ...configuration, agentShortcuts: { codex: [], deepSeekHarness: dsh } };
-  const { rerender } = render(<AgentMappingEditor configuration={loaded} onSave={onSave} onReset={vi.fn()} />);
+  const loaded: RuntimeConfiguration = { ...configuration, agentMappings: { ...configuration.agentMappings!, deepSeekHarness: { x: "deepseek:session.search" } }, agentShortcuts: { codex: [], deepSeekHarness: dsh } };
+  const { rerender } = render(<HostAgentMappingEditor configuration={loaded} onSave={onSave} onReset={vi.fn()} />);
   fireEvent.change(screen.getByRole("combobox", { name: "配置 Agent" }), { target: { value: "deepSeekHarness" } });
   const editor = within(screen.getByRole("group", { name: "deepSeekHarness 映射" }));
   expect(editor.getByRole("option", { name: "发送消息" })).toBeInTheDocument();
@@ -56,7 +66,7 @@ it("shows current DSH keys outside the menu and synchronizes without discarding 
   expect(screen.queryByRole("button", { name: /刷新/ })).not.toBeInTheDocument();
   fireEvent.change(editor.getByLabelText("绑定操作"), { target: { value: "deepseek:session.search" } });
   expect(within(editor.getByRole("region", { name: "当前生效快捷键" })).getByText("Ctrl+K")).toBeInTheDocument();
-  rerender(<AgentMappingEditor configuration={{ ...loaded, agentShortcuts: {
+  rerender(<HostAgentMappingEditor configuration={{ ...loaded, agentShortcuts: {
     codex: [], deepSeekHarness: [dsh[0], { ...dsh[1], shortcut: "Ctrl+J", source: "custom" }],
   } }} onSave={onSave} onReset={vi.fn()} />);
   expect(editor.getByLabelText("绑定操作")).toHaveValue("deepseek:session.search");

@@ -47,8 +47,9 @@ export function useRuntimeState() {
     let pending: RuntimeStateUpdate | undefined;
     let frame: number | undefined;
     const unsubscribe = appBridge.subscribe((message) => {
-      if (message.type !== "runtimeState") return;
-      pending = mergeRuntimeUpdate(pending ?? {}, message.payload);
+      if (message.type === "settingsPersistence") return;
+      const update = message.type === "commandResult" ? { configuration: message.payload.configuration } : message.payload;
+      pending = mergeRuntimeUpdate(pending ?? {}, update);
       if (frame !== undefined) return;
       frame = window.requestAnimationFrame(() => {
         const update = pending!;

@@ -38,6 +38,17 @@ const photographedRemoteControls = [
 ] as const;
 
 describe("Dashboard", () => {
+  it("shows controller input on the left and its operation on the right", () => {
+    const configuration = { controllerType: "xbox" as const, activeControllerIndex: 0, codexOnly: false,
+      dictationShortcut: "F12", mouseSpeed: 50, scrollSpeed: 50, deadZone: .12, startWithWindows: false,
+      mappings: { a: "send" } };
+    const { container } = render(<Dashboard state={{ ...connectedState, configuration }} onToggleMapping={() => {}} />);
+    const row = container.querySelector(".control-row")!;
+    expect(row.children[0]).toHaveClass("keycap");
+    expect(row.children[0]).toHaveTextContent("A");
+    expect(row.children[1]).toHaveTextContent("发送消息");
+  });
+
   it("shows waiting and test states instead of claiming execution is enabled", () => {
     const configuration = { controllerType: "xbox" as const, activeControllerIndex: 0, codexOnly: true,
       dictationShortcut: "F12", mouseSpeed: 50, scrollSpeed: 50, deadZone: .12, startWithWindows: false,

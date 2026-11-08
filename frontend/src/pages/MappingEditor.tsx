@@ -9,11 +9,6 @@ import type { AgentShortcutOption, AgentTarget, AutoSaveStatus, ControllerType }
 
 export type MappingValues = Record<string, string>;
 
-function serializeMappings(mappings: MappingValues) {
-  return JSON.stringify(Object.fromEntries(Object.entries(mappings)
-    .sort(([left], [right]) => left.localeCompare(right))));
-}
-
 const exclusiveActions = new Set(["dictation", "send", "cancel", "commandPalette", "previousChat", "nextChat", "activateCodex"]);
 const sourceLabels = { custom: "自定义", default: "应用默认", fixed: "应用固定", error: "读取失败" };
 
@@ -36,21 +31,14 @@ export function MappingEditor({ agent = "codex", shortcutOptions, onAgentChange,
   const presentation = getControllerPresentation(controllerType);
   const controls = presentation.controls;
   const incoming = initialValues ?? {};
-  const incomingActions = Object.fromEntries(Object.entries(incoming).map(([key, value]) => [key, value.startsWith("shortcut:") ? "keyboardShortcut" : value]));
-  const incomingShortcuts = Object.fromEntries(Object.entries(incoming).filter(([, value]) => value.startsWith("shortcut:")).map(([key, value]) => [key, value.slice(9)]));
   const [selected, setSelected] = useState(controls[0]?.key ?? "x");
   useEffect(() => setSelected(controls[0]?.key ?? "x"), [controls]);
-  const [values, setValues] = useState(incomingActions);
-  const [shortcuts, setShortcuts] = useState(incomingShortcuts);
-  const serializedIncoming = serializeMappings(incoming);
-  useEffect(() => {
-    if (saveStatus?.state === "applying") return;
-    const mappings = JSON.parse(serializedIncoming) as MappingValues;
-    setValues(Object.fromEntries(Object.entries(mappings).map(([key, value]) =>
-      [key, value.startsWith("shortcut:") ? "keyboardShortcut" : value])));
-    setShortcuts(Object.fromEntries(Object.entries(mappings).filter(([, value]) => value.startsWith("shortcut:"))
-      .map(([key, value]) => [key, value.slice(9)])));
-  }, [serializedIncoming, saveStatus?.state]);
+  const [recordingControl, setRecordingControl] = useState<string | null>(null);
+  const values = Object.fromEntries(Object.entries(incoming).map(([key, value]) =>
+    [key, value.startsWith("shortcut:") ? "keyboardShortcut" : value]));
+  if (recordingControl) values[recordingControl] = "keyboardShortcut";
+  const shortcuts = Object.fromEntries(Object.entries(incoming).filter(([, value]) => value.startsWith("shortcut:"))
+    .map(([key, value]) => [key, value.slice(9)]));
   const selectedControl = controls.find((control) => control.key === selected);
   const selectedLabel = selectedControl?.label ?? selected;
   const conflict = useMemo(() => {
@@ -59,17 +47,16 @@ export function MappingEditor({ agent = "codex", shortcutOptions, onAgentChange,
     const match = controls.find((control) => control.key !== selected && values[control.key] === action);
     return match?.label ?? null;
   }, [selected, values]);
-  const mappings = Object.fromEntries(Object.entries(values).map(([key, value]) =>
-    [key, value === "keyboardShortcut" ? `shortcut:${shortcuts[key] ?? ""}` : value]));
-  const incompleteShortcut = Object.entries(values).some(([key, value]) => value === "keyboardShortcut" && !shortcuts[key]);
+  const mappings = incoming;
+  const incompleteShortcut = recordingControl === selected && !shortcuts[selected];
   const display = getMappingDisplay(mappings[selected], shortcutOptions);
   const agentName = agent === "codex" ? "Codex" : "DeepSeek Harness";
   const hasAppShortcut = codexShortcutActions.has(values[selected]) || values[selected]?.startsWith("deepseek:") || values[selected] === "cancel";
 
   const changeAction = (action: string) => {
-    setValues((current) => ({ ...current, [selected]: action }));
+    setRecordingControl(action === "keyboardShortcut" ? selected : null);
     if (action !== "keyboardShortcut" || shortcuts[selected])
-      onSave({ ...mappings, [selected]: action === "keyboardShortcut" ? `shortcut:${shortcuts[selected]}` : action });
+      onSave({ ...incoming, [selected]: action === "keyboardShortcut" ? `shortcut:${shortcuts[selected]}` : action });
   };
 
   return (
@@ -114,7 +101,7 @@ export function MappingEditor({ agent = "codex", shortcutOptions, onAgentChange,
             <kbd>{display.shortcut ?? (display.message ? "未绑定或不可用" : "正在读取…")}</kbd>
             {display.message && <p>{display.message}</p>}
           </section>}
-          {values[selected] === "keyboardShortcut" && <ShortcutRecorder value={shortcuts[selected] ?? ""} onChange={(shortcut) => { setShortcuts((current) => ({ ...current, [selected]: shortcut })); onSave({ ...mappings, [selected]: `shortcut:${shortcut}` }); }} />}
+          {values[selected] === "keyboardShortcut" && <ShortcutRecorder value={shortcuts[selected] ?? ""} onChange={(shortcut) => { setRecordingControl(null); onSave({ ...mappings, [selected]: `shortcut:${shortcut}` }); }} />}
           {incompleteShortcut && <p className="inline-warning"><AlertTriangle size={16}/>录入完整快捷键后自动生效。</p>}
           {conflict && <p className="duplicate-binding">重复绑定：{conflict} 也会触发该操作。</p>}
         </section>

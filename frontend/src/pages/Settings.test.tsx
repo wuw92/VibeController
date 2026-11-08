@@ -1,3 +1,4 @@
+import * as React from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Rc901aControl, Rc901aInputStatus } from "../app/types";
@@ -10,7 +11,8 @@ const hostSettings: SettingsValues = { controllerType: "xbox", codexOnly: true, 
   deadZone: 0.18, mouseSpeed: 50, scrollSpeed: 50, activeControllerIndex: 0,
   dictationShortcut: "Ctrl+Alt+Shift+F12", codexLightbarEnabled: false };
 function Settings(props: React.ComponentProps<typeof HostSettings>) {
-  return <HostSettings initialValues={hostSettings} {...props} />;
+  const [values, setValues] = React.useState(props.initialValues ?? hostSettings);
+  return <HostSettings {...props} initialValues={values} onSave={(next) => { setValues(next); props.onSave(next); }} />;
 }
 
 const verifiedControls: readonly Rc901aControl[] = [
@@ -70,64 +72,13 @@ describe("Settings", () => {
     expect(details).not.toHaveAttribute("open");
   });
 
-  it("preserves slider edits after saving a controller selection through delayed acknowledgement", () => {
-    const onSave = vi.fn();
-    const onCopyDiagnostics = vi.fn();
-    const persisted: SettingsValues = {
-      controllerType: "xbox", codexOnly: true, startWithWindows: false,
-      deadZone: 0.25, mouseSpeed: 73, scrollSpeed: 37, activeControllerIndex: 2,
-      dictationShortcut: "Ctrl+K", codexLightbarEnabled: false,
-    };
-    const { rerender } = render(<Settings initialValues={persisted}
-      onSave={onSave} onCopyDiagnostics={onCopyDiagnostics} />);
-    fireEvent.click(screen.getByLabelText("PS5 DualSense"));
-    fireEvent.click(screen.getByLabelText("登录 Windows 后自动启动"));
-    const submitted = { ...persisted, controllerType: "playStation5", startWithWindows: true };
-    expect(onSave).toHaveBeenLastCalledWith(submitted);
-
-    // App retains the old controller type until the host confirms it.
-    rerender(<Settings initialValues={{ ...persisted, startWithWindows: true }}
-      onSave={onSave} onCopyDiagnostics={onCopyDiagnostics} saveStatus={{ state: "applying" }} />);
-    expect(screen.getByLabelText("PS5 DualSense")).toBeChecked();
-    fireEvent.change(screen.getByLabelText("鼠标速度"), { target: { value: "91" } });
-    rerender(<Settings initialValues={{ ...submitted, controllerType: "playStation5" }} saveStatus={{ state: "applying" }}
-      onSave={onSave} onCopyDiagnostics={onCopyDiagnostics} />);
-    expect(screen.getByLabelText("鼠标速度")).toHaveValue("91");
-    expect(screen.getByLabelText("PS5 DualSense")).toBeChecked();
-
-    rerender(<Settings initialValues={{ ...submitted, controllerType: "playStation5" }} saveStatus={{ state: "applying" }}
-      onSave={onSave} onCopyDiagnostics={onCopyDiagnostics}
-      codexActivity={{ state: "working", lastEventAt: null, activeSessionCount: 1 }} />);
-    expect(screen.getByLabelText("鼠标速度")).toHaveValue("91");
-    expect(onSave).toHaveBeenLastCalledWith({ ...submitted, mouseSpeed: 91 });
-  });
-
-  it("loads persisted settings arriving after mount and preserves edits through diagnostics refreshes", () => {
-    const onSave = vi.fn();
-    const onCopyDiagnostics = vi.fn();
-    const persisted: SettingsValues = {
-      controllerType: "playStation5", codexOnly: false, startWithWindows: true,
-      deadZone: 0.25, mouseSpeed: 73, scrollSpeed: 37, activeControllerIndex: 2,
-      dictationShortcut: "Ctrl+K", codexLightbarEnabled: true,
-    };
-    const { rerender } = render(<Settings onSave={onSave} onCopyDiagnostics={onCopyDiagnostics} />);
-    rerender(<Settings initialValues={persisted} onSave={onSave} onCopyDiagnostics={onCopyDiagnostics} />);
-    expect(screen.getByLabelText("PS5 DualSense")).toBeChecked();
-    expect(screen.getByLabelText("仅在目标应用前台时执行")).not.toBeChecked();
-    expect(screen.getByLabelText("鼠标速度")).toHaveValue("73");
-
-    fireEvent.click(screen.getByLabelText("Xbox 无线手柄"));
-    rerender(<Settings initialValues={{ ...persisted }} saveStatus={{ state: "applying" }} onSave={onSave} onCopyDiagnostics={onCopyDiagnostics}
-      codexActivity={{ state: "working", lastEventAt: null, activeSessionCount: 1 }} />);
-    expect(screen.getByLabelText("Xbox 无线手柄")).toBeChecked();
-    expect(onSave).toHaveBeenCalledWith({ ...persisted, controllerType: "xbox" });
-    rerender(<Settings initialValues={{ ...persisted, controllerType: "xbox" }}
-      onSave={onSave} onCopyDiagnostics={onCopyDiagnostics} />);
-
-    rerender(<Settings initialValues={{ ...persisted, mouseSpeed: 81 }}
-      onSave={onSave} onCopyDiagnostics={onCopyDiagnostics} />);
-    expect(screen.getByLabelText("PS5 DualSense")).toBeChecked();
+  it("renders new confirmed configuration without a second local settings copy", () => {
+    const props = { onSave: vi.fn(), onCopyDiagnostics: vi.fn() };
+    const { rerender } = render(<HostSettings {...props} />);
+    expect(screen.getByText("等待应用配置…")).toBeInTheDocument();
+    rerender(<HostSettings {...props} initialValues={{ ...hostSettings, mouseSpeed: 81 }} />);
     expect(screen.getByLabelText("鼠标速度")).toHaveValue("81");
+    expect(props.onSave).not.toHaveBeenCalled();
   });
 
   it("keeps device choice first without duplicating the mapping explanation", () => {

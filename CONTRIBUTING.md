@@ -39,7 +39,7 @@ The machine-readable contract lives in [the backend payload records](src/VibeCon
 - `runtimeState` keeps its existing envelope. Input-only payloads omit `configuration`; configuration changes are coalesced independently of input processing. `requestState` and `CurrentStateJson` provide a self-contained replay with configuration.
 - Consumers merge partial configuration fields, retaining configuration when omitted or `null`. A supplied `mappings` dictionary is a **complete profile snapshot**, including reset results, not a dictionary patch. Controls likewise represent the latest snapshot.
 - React coalesces host messages to one update per animation frame. Backend `DefaultProfileFactory` is authoritative for mapping defaults; the editor waits for host configuration and waits for the host's reset response. The dashboard displays current host mappings rather than a second default table.
-- The settings editor synchronizes when persisted values change or first arrive, but diagnostics-only refreshes do not discard unsaved edits.
+- Configuration changes are managed in one frontend module. Pages render its current configuration; only incomplete keyboard-shortcut recording stays local. Host updates and replies share revision ordering.
 - `npm run dev --prefix frontend` without a WebView host displays a disconnected/loading workspace. Add `?demo` to explicitly preview controller feedback; mapping editing remains disabled until host configuration arrives.
 
 ## Pull requests / Pull Request 要求

@@ -13,18 +13,13 @@ interface AgentMappingEditorProps {
 
 export function AgentMappingEditor({ configuration, onSave, onReset, saveStatus, undoResetAgent, onUndoReset }: AgentMappingEditorProps) {
   const [agent, setAgent] = useState<AgentTarget>("codex");
-  const [visited, setVisited] = useState<AgentTarget[]>(["codex"]);
-  const selectAgent = (target: AgentTarget) => {
-    setAgent(target);
-    setVisited((current) => current.includes(target) ? current : [...current, target]);
-  };
-  return <>{visited.map((target) => <div key={target} hidden={target !== agent} role="group" aria-label={`${target} 映射`}>
-    <MappingEditor agent={target} onAgentChange={selectAgent}
-      saveStatus={saveStatus?.[target]}
+  return <div role="group" aria-label={`${agent} 映射`}>
+    <MappingEditor key={agent} agent={agent} onAgentChange={setAgent}
+      saveStatus={saveStatus?.[agent]}
       controllerType={configuration?.controllerType} codexOnly={configuration?.codexOnly}
-      shortcutOptions={configuration?.agentShortcuts?.[target]}
-      initialValues={configuration?.agentMappings?.[target] ?? (target === "codex" ? configuration?.mappings : undefined)}
-      onSave={(mappings) => onSave(target, mappings)} onReset={() => onReset(target)} onResetControl={(control) => onReset(target, control)}
-      onUndoReset={undoResetAgent === target ? onUndoReset : undefined} />
-  </div>)}</>;
+      shortcutOptions={configuration?.agentShortcuts?.[agent]}
+      initialValues={configuration?.agentMappings?.[agent] ?? (agent === "codex" ? configuration?.mappings : undefined)}
+      onSave={(mappings) => onSave(agent, mappings)} onReset={() => onReset(agent)} onResetControl={(control) => onReset(agent, control)}
+      onUndoReset={undoResetAgent === agent ? onUndoReset : undefined} />
+  </div>;
 }

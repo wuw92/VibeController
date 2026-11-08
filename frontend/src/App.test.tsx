@@ -148,10 +148,7 @@ describe("App RC901A bridge wiring", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "save Xbox" }));
 
-    const update = mocked.setState.mock.calls[0][0] as (
-      current: RuntimeStatePayload,
-    ) => RuntimeStatePayload;
-    const optimisticState = update(mocked.state);
-    expect(optimisticState.configuration?.controllerType).toBe("tclRc901a");
+    expect(mocked.request).toHaveBeenCalledWith("updateSettings", expect.objectContaining({ controllerType: "xbox" }));
+    expect(mocked.state.configuration.controllerType).toBe("tclRc901a");
   });
 });

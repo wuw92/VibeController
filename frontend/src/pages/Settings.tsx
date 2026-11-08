@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import { Battery, Bluetooth, Clipboard, Gamepad2, Lightbulb, Mic2, Radio, RefreshCw, Trash2 } from "lucide-react";
 import { AutoSaveFeedback } from "../components/AutoSaveFeedback";
 import { SliderField } from "../components/SliderField";
@@ -52,23 +51,6 @@ interface SettingsProps {
   rc901aInput?: Rc901aInputStatus;
 }
 
-const defaultSettings: SettingsValues = {
-  controllerType: "xbox",
-  codexOnly: true,
-  startWithWindows: false,
-  deadZone: 0.18,
-  mouseSpeed: 50,
-  scrollSpeed: 50,
-  activeControllerIndex: 0,
-  dictationShortcut: "Ctrl+Alt+Shift+F12",
-  codexLightbarEnabled: false,
-};
-
-function serializeSettings(values: SettingsValues) {
-  return JSON.stringify(Object.fromEntries(Object.entries(values)
-    .sort(([left], [right]) => left.localeCompare(right))));
-}
-
 const activityLabels = {
   idle: "空闲",
   working: "工作中",
@@ -97,17 +79,9 @@ export function Settings({
   rc901a,
   rc901aInput,
 }: SettingsProps) {
-  const [values, setValues] = useState<SettingsValues>(initialValues ?? defaultSettings);
-  const serializedInitialValues = initialValues ? serializeSettings(initialValues) : null;
-  useEffect(() => {
-    if (serializedInitialValues === null || saveStatus?.state === "applying") return;
-    setValues(JSON.parse(serializedInitialValues) as SettingsValues);
-  }, [serializedInitialValues, saveStatus?.state]);
-  const update = <K extends keyof SettingsValues>(key: K, value: SettingsValues[K]) => {
-    const next = { ...values, [key]: value };
-    setValues(next);
-    onSave(next);
-  };
+  if (!initialValues) return <main className="workspace-page settings-page"><h1>设置</h1><p>等待应用配置…</p></main>;
+  const values = initialValues;
+  const update = <K extends keyof SettingsValues>(key: K, value: SettingsValues[K]) => onSave({ ...values, [key]: value });
   const microphoneName = microphone?.defaultDeviceName ?? (
     microphone?.state === "noDevices" ? "未检测到录音设备" : "等待检测"
   );

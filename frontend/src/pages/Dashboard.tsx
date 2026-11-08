@@ -91,8 +91,8 @@ export function Dashboard({ state, onToggleMapping, onToggleTestMode, onOpenMapp
                 const mapping = getMappingDisplay(action,
                   state.configuration?.agentShortcuts?.[state.configuration.activeAgent ?? "codex"]);
                 return <div className="control-row" key={key}>
-                  <span className="control-row-description"><span>{mapping.label}</span>{mapping.shortcut && <small>{mapping.shortcut}</small>}</span>
                   <span className="keycap">{keycap}</span>
+                  <span className="control-row-description"><span>{mapping.label}</span>{mapping.shortcut && <small>{mapping.shortcut}</small>}</span>
                 </div>;
               })}
             </div>

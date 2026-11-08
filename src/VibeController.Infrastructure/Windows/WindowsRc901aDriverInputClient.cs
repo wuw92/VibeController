@@ -211,14 +211,14 @@ public sealed class WindowsRc901aDriverInputClient :
         {
             try
             {
-                await pollTask;
+                await pollTask.ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
             }
         }
 
-        await _pollGate.WaitAsync();
+        await _pollGate.WaitAsync().ConfigureAwait(false);
         try
         {
             _transport.Dispose();

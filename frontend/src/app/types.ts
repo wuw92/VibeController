@@ -1,5 +1,13 @@
 export type ConnectionState = "unknown" | "connected" | "disconnected";
 export type ControllerType = "xbox" | "playStation5" | "tclRc901a";
+export type AgentTarget = "codex" | "deepSeekHarness";
+export interface AgentShortcutOption {
+  value: string;
+  label: string;
+  shortcut: string | null;
+  source: "default" | "custom" | "fixed" | "error";
+  message: string | null;
+}
 export type MicrophoneDetectionState = "available" | "noDevices" | "error";
 export type CodexActivityState = "idle" | "working" | "needsAttention" | "completed";
 export type Rc901aConnectionState =
@@ -132,10 +140,21 @@ export interface RuntimeStatePayload {
   packetNumber: number;
   controls: Record<string, number>;
   lastAction: string | null;
+  recentAction?: RecentActionInfo | null;
   configuration?: RuntimeConfiguration;
 }
 
+export interface RecentActionInfo {
+  control: string;
+  action: string | null;
+  status: "dispatched" | "blocked" | "failed" | "test" | "paused" | "unmapped";
+  message: string | null;
+  agent: AgentTarget;
+  controllerType: ControllerType;
+}
+
 export interface RuntimeConfiguration {
+  revision?: number;
   controllerType: ControllerType;
   activeControllerIndex: number;
   codexOnly: boolean;
@@ -145,6 +164,10 @@ export interface RuntimeConfiguration {
   deadZone: number;
   startWithWindows: boolean;
   mappings: Record<string, string>;
+  agentMappings?: Record<AgentTarget, Record<string, string>>;
+  activeAgent?: AgentTarget;
+  foregroundAgent?: AgentTarget | null;
+  agentShortcuts?: Record<AgentTarget, AgentShortcutOption[]>;
   codexLightbarEnabled?: boolean;
   microphone?: MicrophoneStatus;
   codexHook?: CodexHookRegistrationStatus;
@@ -163,7 +186,20 @@ export type RuntimeStateUpdate = Partial<Omit<RuntimeStatePayload, "configuratio
   configuration?: Partial<RuntimeConfiguration> | null;
 };
 
-export type HostMessage = RuntimeStateMessage;
+export interface CommandResult {
+  requestId: string;
+  succeeded: boolean;
+  configuration: RuntimeConfiguration;
+  error: string | null;
+}
+
+export interface AutoSaveStatus {
+  state: "idle" | "applying" | "error";
+  error?: string;
+}
+
+export type HostMessage = RuntimeStateMessage | { version: 1; type: "commandResult"; payload: CommandResult }
+  | { version: 1; type: "settingsPersistence"; payload: { error: string | null } };
 
 export type CommandType =
   | "setMappingEnabled"
@@ -185,4 +221,5 @@ export interface BridgeCommand<TPayload = unknown> {
   version: 1;
   type: CommandType;
   payload: TPayload;
+  requestId?: string;
 }

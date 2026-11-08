@@ -2,14 +2,17 @@ import { useState } from "react";
 import { AppShell } from "./components/AppShell";
 import type { AppPage } from "./components/AppShell";
 import { Dashboard } from "./pages/Dashboard";
-import { MappingEditor } from "./pages/MappingEditor";
+import { AgentMappingEditor } from "./pages/AgentMappingEditor";
 import { Settings } from "./pages/Settings";
 import { appBridge } from "./app/AppBridge";
 import { useRuntimeState } from "./app/useRuntimeState";
+import { useConfigurationChanges } from "./app/useConfigurationChanges";
 
 export default function App() {
   const [state, setState] = useRuntimeState();
   const [page, setPage] = useState<AppPage>("dashboard");
+  const { configuration, statuses, persistenceError, changeMapping, changeSettings, resetMapping,
+    undoResetAgent, undoReset } = useConfigurationChanges(state.configuration);
 
   const toggleMapping = (enabled: boolean) => {
     setState((current) => ({ ...current, mappingEnabled: enabled }));
@@ -23,52 +26,43 @@ export default function App() {
 
   return (
     <AppShell page={page} onNavigate={setPage}>
-      {page === "dashboard" && <Dashboard state={state} onToggleMapping={toggleMapping} onToggleTestMode={toggleTestMode} />}
+      {persistenceError && <p className="configuration-persistence-error" role="alert">更改已生效，但未能自动保存：{persistenceError}</p>}
+      {page === "dashboard" && <Dashboard state={{ ...state, configuration }} onToggleMapping={toggleMapping} onToggleTestMode={toggleTestMode} onOpenMappings={() => setPage("mapping")} />}
       {page === "mapping" && (
-        <MappingEditor
-          controllerType={state.configuration?.controllerType}
-          initialValues={state.configuration?.mappings}
-          onSave={(mapping) => appBridge.send("updateMapping", mapping)}
-          onReset={() => appBridge.send("resetDefaults", {})}
+        <AgentMappingEditor
+          configuration={configuration}
+          saveStatus={statuses}
+          onSave={changeMapping}
+          onReset={(agent, control) => { void resetMapping(agent, control); }}
+          undoResetAgent={undoResetAgent}
+          onUndoReset={undoReset}
         />
       )}
       {page === "settings" && (
         <Settings
-          initialValues={state.configuration ? {
-            controllerType: state.configuration.controllerType,
-            activeControllerIndex: state.configuration.activeControllerIndex,
-            codexOnly: state.configuration.codexOnly,
-            dictationShortcut: state.configuration.dictationShortcut,
-            mouseSpeed: Math.round(state.configuration.mouseSpeed),
-            scrollSpeed: Math.round(state.configuration.scrollSpeed),
-            deadZone: state.configuration.deadZone,
-            startWithWindows: state.configuration.startWithWindows,
-            codexLightbarEnabled: state.configuration.codexLightbarEnabled ?? false,
+          saveStatus={statuses.settings}
+          initialValues={configuration ? {
+            controllerType: configuration.controllerType,
+            activeControllerIndex: configuration.activeControllerIndex,
+            codexOnly: configuration.codexOnly,
+            dictationShortcut: configuration.dictationShortcut,
+            mouseSpeed: Math.round(configuration.mouseSpeed),
+            scrollSpeed: Math.round(configuration.scrollSpeed),
+            deadZone: configuration.deadZone,
+            startWithWindows: configuration.startWithWindows,
+            codexLightbarEnabled: configuration.codexLightbarEnabled ?? false,
           } : undefined}
-          microphone={state.configuration?.microphone}
-          codexHook={state.configuration?.codexHook}
-          codexActivity={state.configuration?.codexActivity}
-          rc901a={state.configuration?.rc901a}
-          rc901aInput={state.configuration?.rc901aInput}
+          microphone={configuration?.microphone}
+          codexHook={configuration?.codexHook}
+          codexActivity={configuration?.codexActivity}
+          rc901a={configuration?.rc901a}
+          rc901aInput={configuration?.rc901aInput}
           persistedControllerType={state.configuration?.controllerType}
           rc901aLearningReady={
-            state.configuration?.rc901a?.connectionState === "connected" ||
-            state.configuration?.rc901a?.connectionState === "connectedLimited"
+            configuration?.rc901a?.connectionState === "connected" ||
+            configuration?.rc901a?.connectionState === "connectedLimited"
           }
-          onSave={(settings) => {
-            setState((current) => ({
-              ...current,
-              lastAction: settings.controllerType === current.configuration?.controllerType
-                ? current.lastAction
-                : null,
-              configuration: current.configuration ? {
-                ...current.configuration,
-                ...settings,
-                controllerType: current.configuration.controllerType,
-              } : current.configuration,
-            }));
-            appBridge.send("updateSettings", settings);
-          }}
+          onSave={changeSettings}
           onRefreshIntegrations={() => appBridge.send("refreshIntegrations", {})}
           onRefreshRc901a={() => appBridge.send("refreshRc901a", {})}
           onClearRc901aSamples={() => appBridge.send("clearRc901aSamples", {})}

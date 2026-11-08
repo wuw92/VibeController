@@ -1,146 +1,109 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, RefreshCw, RotateCcw, Save } from "lucide-react";
-import { ActionPicker, actionOptions } from "../components/ActionPicker";
+import { useEffect, useMemo, useState } from "react";
+import { AlertTriangle, RotateCcw } from "lucide-react";
+import { ActionPicker } from "../components/ActionPicker";
+import { codexShortcutActions, getMappingDisplay } from "../app/mappingActions";
+import { AutoSaveFeedback } from "../components/AutoSaveFeedback";
 import { ShortcutRecorder } from "../components/ShortcutRecorder";
 import { getControllerPresentation } from "../app/controllerPresentation";
-import type { ControllerType } from "../app/types";
+import type { AgentShortcutOption, AgentTarget, AutoSaveStatus, ControllerType } from "../app/types";
 
 export type MappingValues = Record<string, string>;
 
-function serializeMappings(mappings: MappingValues) {
-  return JSON.stringify(Object.fromEntries(Object.entries(mappings)
-    .sort(([left], [right]) => left.localeCompare(right))));
-}
-
 const exclusiveActions = new Set(["dictation", "send", "cancel", "commandPalette", "previousChat", "nextChat", "activateCodex"]);
-const codexShortcutActions = new Set([
-  "dictation", "send", "commandPalette", "previousChat", "nextChat",
-  "previousRecentThread", "nextRecentThread", "previousTab", "nextTab",
-  "increaseReasoning", "decreaseReasoning",
-]);
-const actionLabels = new Map<string, string>(actionOptions);
-
-function describeShortcut(shortcut: string | undefined) {
-  if (!shortcut) return "键盘：请录入快捷键";
-  const displayName = {
-    Backspace: "Backspace（删除上一个字符）",
-    ArrowUp: "↑（ArrowUp）",
-    ArrowDown: "↓（ArrowDown）",
-    ArrowLeft: "←（ArrowLeft）",
-    ArrowRight: "→（ArrowRight）",
-  }[shortcut] ?? shortcut;
-  return `键盘：${displayName}`;
-}
-
-function describeMapping(action: string, shortcut: string | undefined) {
-  return action === "keyboardShortcut"
-    ? describeShortcut(shortcut)
-    : actionLabels.get(action) ?? "未设置";
-}
+const sourceLabels = { custom: "自定义", default: "应用默认", fixed: "应用固定", error: "读取失败" };
 
 interface MappingEditorProps {
+  agent?: AgentTarget;
+  shortcutOptions?: AgentShortcutOption[];
+  onAgentChange?(agent: AgentTarget): void;
+  codexOnly?: boolean;
   controllerType?: ControllerType;
   onSave(values: MappingValues): void;
   onReset(): void;
+  onResetControl?(control: string): void;
+  onUndoReset?(): void;
   initialValues?: MappingValues;
+  saveStatus?: AutoSaveStatus;
 }
 
-export function MappingEditor({ controllerType = "xbox", onSave, onReset, initialValues }: MappingEditorProps) {
+export function MappingEditor({ agent = "codex", shortcutOptions, onAgentChange, codexOnly,
+  controllerType = "xbox", onSave, onReset, onResetControl, onUndoReset, initialValues, saveStatus }: MappingEditorProps) {
   const presentation = getControllerPresentation(controllerType);
   const controls = presentation.controls;
   const incoming = initialValues ?? {};
-  const incomingActions = Object.fromEntries(Object.entries(incoming).map(([key, value]) => [key, value.startsWith("shortcut:") ? "keyboardShortcut" : value]));
-  const incomingShortcuts = Object.fromEntries(Object.entries(incoming).filter(([, value]) => value.startsWith("shortcut:")).map(([key, value]) => [key, value.slice(9)]));
   const [selected, setSelected] = useState(controls[0]?.key ?? "x");
   useEffect(() => setSelected(controls[0]?.key ?? "x"), [controls]);
-  const [values, setValues] = useState(incomingActions);
-  const [shortcuts, setShortcuts] = useState(incomingShortcuts);
-  const [saved, setSaved] = useState(false);
-  const [resetting, setResetting] = useState(false);
-  const draftRevision = useRef(0);
-  const submissions = useRef<{ snapshot: string; revision: number }[]>([]);
-  const serializedIncoming = serializeMappings(incoming);
-  const lastIncoming = useRef<string | undefined>(undefined);
-  useEffect(() => {
-    const acknowledgedIndex = submissions.current
-      .map((submission) => submission.snapshot).lastIndexOf(serializedIncoming);
-    if (acknowledgedIndex >= 0) {
-      const acknowledged = submissions.current[acknowledgedIndex];
-      submissions.current.splice(0, acknowledgedIndex + 1);
-      if (!resetting && draftRevision.current > acknowledged.revision) {
-        lastIncoming.current = serializedIncoming;
-        return;
-      }
-    }
-    if (lastIncoming.current === serializedIncoming && !resetting) return;
-    lastIncoming.current = serializedIncoming;
-    const mappings = JSON.parse(serializedIncoming) as MappingValues;
-    setValues(Object.fromEntries(Object.entries(mappings).map(([key, value]) =>
-      [key, value.startsWith("shortcut:") ? "keyboardShortcut" : value])));
-    setShortcuts(Object.fromEntries(Object.entries(mappings)
-      .filter(([, value]) => value.startsWith("shortcut:"))
-      .map(([key, value]) => [key, value.slice(9)])));
-    setSaved(false);
-    setResetting(false);
-  }, [serializedIncoming, initialValues]);
+  const [recordingControl, setRecordingControl] = useState<string | null>(null);
+  const values = Object.fromEntries(Object.entries(incoming).map(([key, value]) =>
+    [key, value.startsWith("shortcut:") ? "keyboardShortcut" : value]));
+  if (recordingControl) values[recordingControl] = "keyboardShortcut";
+  const shortcuts = Object.fromEntries(Object.entries(incoming).filter(([, value]) => value.startsWith("shortcut:"))
+    .map(([key, value]) => [key, value.slice(9)]));
   const selectedControl = controls.find((control) => control.key === selected);
   const selectedLabel = selectedControl?.label ?? selected;
   const conflict = useMemo(() => {
     const action = values[selected];
-    if (!exclusiveActions.has(action)) return null;
+    if (!exclusiveActions.has(action) && !action?.startsWith("deepseek:")) return null;
     const match = controls.find((control) => control.key !== selected && values[control.key] === action);
     return match?.label ?? null;
   }, [selected, values]);
-  const actionLabel = describeMapping(values[selected], shortcuts[selected]);
+  const mappings = incoming;
+  const incompleteShortcut = recordingControl === selected && !shortcuts[selected];
+  const display = getMappingDisplay(mappings[selected], shortcutOptions);
+  const agentName = agent === "codex" ? "Codex" : "DeepSeek Harness";
+  const hasAppShortcut = codexShortcutActions.has(values[selected]) || values[selected]?.startsWith("deepseek:") || values[selected] === "cancel";
 
   const changeAction = (action: string) => {
-    draftRevision.current++;
-    setValues((current) => ({ ...current, [selected]: action }));
-    setSaved(false);
-  };
-
-  const saveMapping = () => {
-    const mappings = Object.fromEntries(Object.entries(values).map(([key, value]) =>
-      [key, value === "keyboardShortcut" ? `shortcut:${shortcuts[key] ?? ""}` : value]));
-    submissions.current.push({ snapshot: serializeMappings(mappings), revision: draftRevision.current });
-    onSave(mappings);
-    setSaved(true);
+    setRecordingControl(action === "keyboardShortcut" ? selected : null);
+    if (action !== "keyboardShortcut" || shortcuts[selected])
+      onSave({ ...incoming, [selected]: action === "keyboardShortcut" ? `shortcut:${shortcuts[selected]}` : action });
   };
 
   return (
-    <main className="workspace-page">
+    <main className="workspace-page mapping-page">
       <header className="page-heading">
-        <div><p className="eyebrow">Input map</p><h1>按键映射</h1><p>选择手柄按键，再绑定 Codex 快捷操作或键鼠输入。</p></div>
+        <div><h1>按键映射</h1><p>选择按键并修改绑定，修改后即生效。</p></div>
         <div className="page-actions">
-          <button className="quiet-button" type="button" disabled={!initialValues || resetting} onClick={() => { submissions.current = []; setResetting(true); setSaved(false); onReset(); }}><RotateCcw size={15}/>恢复默认</button>
-          <button className="primary-button" type="button" disabled={!initialValues || resetting} onClick={saveMapping}><Save size={15}/>保存映射</button>
+          {onUndoReset && <button className="quiet-button" type="button" onClick={onUndoReset}>撤销重置</button>}
+          <button className="quiet-button" type="button" disabled={!initialValues || saveStatus?.state === "applying"} onClick={onReset}><RotateCcw size={15}/>重置 {agentName} 全部映射</button>
         </div>
       </header>
 
+      <div className="mapping-toolbar">
+        {onAgentChange && <label className="field-stack"><span>配置 Agent</span>
+          <select aria-label="配置 Agent" value={agent} onChange={(event) => onAgentChange(event.target.value as AgentTarget)}>
+            <option value="codex">Codex</option><option value="deepSeekHarness">DeepSeek Harness</option>
+          </select>
+        </label>}
+        <p className="mapping-mode">{codexOnly === false ? "全局模式：始终使用 Codex 映射。" : "自动识别前台应用，使用对应 Agent 的映射。"}</p>
+        <AutoSaveFeedback status={saveStatus} />
+      </div>
+
       {!initialValues && <p role="status">等待主机配置；映射编辑暂不可用。</p>}
-      <fieldset className="editor-grid" disabled={!initialValues || resetting} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
+      <fieldset className="editor-grid" disabled={!initialValues}>
         <section className="mapping-list" aria-label={`${presentation.statusName}按键列表`}>
-          {controls.map(({ key, label, keycap }) => (
+          {controls.map(({ key, label, keycap }) => {
+            const mapping = getMappingDisplay(mappings[key], shortcutOptions);
+            return (
             <button key={key} type="button" aria-label={label} data-selected={selected === key} onClick={() => setSelected(key)}>
               <span className="keycap">{keycap}</span>
-              <span><strong>{label}</strong><small>{describeMapping(values[key], shortcuts[key])}</small></span>
+              <span className="mapping-row-body"><strong>{label}</strong><small>{mapping.label}</small></span>
+              {mapping.shortcut && <span className="mapping-row-shortcut" title={mapping.shortcut}>{mapping.shortcut}</span>}
             </button>
-          ))}
+          ); })}
         </section>
 
         <section className="inspector-card">
-          <div className="inspector-title"><span className="large-keycap">{selectedControl?.keycap ?? selectedLabel.split(" ")[0]}</span><div><p>正在编辑</p><h2>{selectedLabel}</h2></div></div>
-          <ActionPicker value={values[selected] ?? "none"} onChange={changeAction} />
-          {codexShortcutActions.has(values[selected]) && (
-            <p className="codex-shortcut-note">
-              <RefreshCw size={14} aria-hidden="true" />
-              <span>首次触发时读取 Codex 当前快捷键；修改 Codex 设置后会自动刷新。</span>
-            </p>
-          )}
-          {values[selected] === "keyboardShortcut" && <ShortcutRecorder value={shortcuts[selected] ?? ""} onChange={(shortcut) => { draftRevision.current++; setShortcuts((current) => ({ ...current, [selected]: shortcut })); setSaved(false); }} />}
-          <div className="mapping-preview"><span>触发结果</span><strong>{actionLabel}</strong></div>
-          {conflict && <p className="inline-warning" role="alert"><AlertTriangle size={16}/>与 {conflict}冲突；实际使用时两个按键都会触发该操作。</p>}
-          {saved && <p className="save-confirmation" role="status">映射已保存</p>}
+          <div className="inspector-title"><h2>{selectedLabel}</h2>{onResetControl && <button className="quiet-button reset-control" type="button" onClick={() => onResetControl(selected)}>重置此按键</button>}</div>
+          <ActionPicker control={selected} agent={agent} shortcutOptions={shortcutOptions} value={values[selected] ?? "none"} onChange={changeAction} />
+          {hasAppShortcut && <section className="shortcut-detail" aria-label="当前生效快捷键">
+            <div className="shortcut-detail-heading"><span>快捷键</span>{display.source && <span className="shortcut-source">{sourceLabels[display.source]}</span>}</div>
+            <kbd>{display.shortcut ?? (display.message ? "未绑定或不可用" : "正在读取…")}</kbd>
+            {display.message && <p>{display.message}</p>}
+          </section>}
+          {values[selected] === "keyboardShortcut" && <ShortcutRecorder value={shortcuts[selected] ?? ""} onChange={(shortcut) => { setRecordingControl(null); onSave({ ...mappings, [selected]: `shortcut:${shortcut}` }); }} />}
+          {incompleteShortcut && <p className="inline-warning"><AlertTriangle size={16}/>录入完整快捷键后自动生效。</p>}
+          {conflict && <p className="duplicate-binding">重复绑定：{conflict} 也会触发该操作。</p>}
         </section>
       </fieldset>
     </main>

@@ -26,12 +26,23 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
     private Rc901aUnknownInputSignal? _lastUnknownRc901aInput;
     private CancellationTokenSource? _rc901aLearningSaveCancellation;
     private MappingProfile? _formattedProfile;
+    private readonly IForegroundAppService _foregroundAppService;
+    private readonly IDeepSeekShortcutResolver _deepSeekShortcutResolver;
+    private readonly CodexShortcutResolver _codexShortcutResolver;
+    private IReadOnlyList<AgentShortcutOption>? _deepSeekShortcuts;
+    private IReadOnlyList<AgentShortcutOption>? _codexShortcuts;
+    private AgentTarget _activeAgent = AgentTarget.Codex;
+    private AgentTarget? _foregroundAgent;
+    private RecentActionPayload? _recentAction;
+    private MappingProfile? _runtimeProfile;
     private IReadOnlyDictionary<string, string> _formattedMappings =
         new Dictionary<string, string>();
     private readonly CancellationTokenSource _cancellation = new();
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly SemaphoreSlim _settingsWriteGate = new(1, 1);
     private AppSettings _settings = AppSettings.CreateDefault();
+    private bool _settingsSavePending;
+    private Task? _settingsSaveTask;
     private ControllerRuntime? _runtime;
     private IControllerLightbar? _lightbar;
     private Rc901aControllerAdapter? _rc901aAdapter;
@@ -67,9 +78,15 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
 
     public ControllerRuntimeService(
         ISettingsStore settingsStore,
-        IRc901aRawInputSource? rc901aRawInputSource = null)
+        IRc901aRawInputSource? rc901aRawInputSource = null,
+        IForegroundAppService? foregroundAppService = null,
+        IDeepSeekShortcutResolver? deepSeekShortcutResolver = null,
+        CodexShortcutResolver? codexShortcutResolver = null)
     {
         _settingsStore = settingsStore;
+        _foregroundAppService = foregroundAppService ?? new CodexWindowService();
+        _deepSeekShortcutResolver = deepSeekShortcutResolver ?? new DeepSeekShortcutResolver();
+        _codexShortcutResolver = codexShortcutResolver ?? new CodexShortcutResolver();
         _rc901aRawInputSource = rc901aRawInputSource;
         var localDataDirectory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -112,6 +129,8 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
 
         var type = typeElement.GetString();
         var payload = root.TryGetProperty("payload", out var value) ? value : default;
+        var requestId = root.TryGetProperty("requestId", out var request) ? request.GetString() : null;
+        CommandResultPayload? commandResult = null;
 
         if (string.Equals(
                 type,
@@ -122,7 +141,8 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
             return;
         }
 
-        var serializesSettingsWrite = CommandWritesSettings(type);
+        var serializesSettingsWrite = CommandWritesSettings(type) &&
+            type is not ("updateMapping" or "updateSettings" or "resetDefaults");
         if (serializesSettingsWrite)
         {
             await _settingsWriteGate.WaitAsync(_cancellation.Token);
@@ -145,16 +165,13 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
                         _stateDirty = true;
                         break;
                     case "updateSettings":
-                        await UpdateSettingsAsync(payload);
+                        UpdateSettings(payload);
                         break;
                     case "updateMapping":
-                        await UpdateMappingAsync(payload);
+                        UpdateMapping(payload);
                         break;
                     case "resetDefaults":
-                        _settings = _settings with { Profile = DefaultProfileFactory.Create() };
-                        _stateDirty = true;
-                        _runtime?.UpdateProfile(_settings.Profile);
-                        await _settingsStore.SaveAsync(_settings, _cancellation.Token);
+                        ResetMappings(payload);
                         break;
                     case "requestState":
                         PublishCurrent();
@@ -184,6 +201,12 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
                         await ResetRc901aLearnedBindingsAsync();
                         break;
                 }
+                if (requestId is not null)
+                    commandResult = new(requestId, true, BuildConfiguration());
+            }
+            catch (Exception exception) when (requestId is not null && exception is not OperationCanceledException)
+            {
+                commandResult = new(requestId, false, BuildConfiguration(), exception.Message);
             }
             finally
             {
@@ -197,6 +220,8 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
                 _settingsWriteGate.Release();
             }
         }
+        if (commandResult is not null)
+            StateJsonReady?.Invoke(BridgeJson.Serialize(new BridgeMessage<CommandResultPayload>(1, "commandResult", commandResult)));
     }
 
     private static bool CommandWritesSettings(string? type) =>
@@ -232,6 +257,7 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
             {
                 if (_runtime is null) continue;
                 var timestamp = DateTimeOffset.UtcNow;
+                UpdateActiveProfile();
                 if (ExpireRc901aLearning(timestamp))
                 {
                     _rc901aAdapter?.ResetInputState();
@@ -246,7 +272,7 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
                 {
                     _rc901aAdapter?.ResetInputState();
                 }
-                var integrationChanged = PollCodexActivity(timestamp);
+                var integrationChanged = PollIntegrations(timestamp);
                 ApplyLightbarColor(timestamp);
                 PublishRuntimeState(result, timestamp, integrationChanged);
             }
@@ -289,10 +315,12 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
             _nextConfigurationPublish = timestamp.Add(IntegrationPollInterval);
             _stateDirty = false;
         }
+        _recentAction = BuildRecentAction(result) ?? _recentAction;
         var message = BridgeMessageFactory.RuntimeState(
             result.State,
-            DescribeLastAction(result, _settings.ControllerType),
-            publishConfiguration ? _lastConfiguration : null);
+            null,
+            publishConfiguration ? _lastConfiguration : null,
+            _recentAction);
         var json = BridgeJson.Serialize(message);
         if (publishConfiguration || !string.Equals(json, _lastRuntimeJson, StringComparison.Ordinal))
         {
@@ -312,7 +340,8 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
             _settings.CodexOnly,
             _settings.DictationShortcut,
             _settings.MouseSpeed,
-            _settings.ScrollSpeed),
+            _settings.ScrollSpeed,
+            _activeAgent),
         _settings.RepeatDelayMilliseconds,
         _settings.RepeatIntervalMilliseconds);
 
@@ -328,7 +357,8 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
         var executor = new WindowsActionExecutor(
             new WindowsInputApi(),
             codex,
-            new CodexShortcutResolver());
+            _codexShortcutResolver,
+            _deepSeekShortcutResolver);
         var adapter = WindowsControllerAdapterFactory.Create(
             _settings.ControllerType,
             _rc901aRawInputSource,
@@ -347,8 +377,9 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
         _lightbarAnimation = new CodexActivityLightbarAnimation();
         _runtime = new ControllerRuntime(
             adapter,
-            new ActionDispatcher(codex, executor),
-            _settings.Profile);
+            new ActionDispatcher(_foregroundAppService, executor),
+            _settings.GetProfile(_activeAgent));
+        _runtimeProfile = _settings.GetProfile(_activeAgent);
         ApplyLightbarColor(DateTimeOffset.UtcNow);
     }
 
@@ -484,7 +515,7 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
                                 _rc901aLearning.CompleteSave(sessionId);
                             if (commitAccepted)
                             {
-                                _settings = nextSettings!;
+                                _settings = _settings with { Rc901aLearnedBindings = nextSettings!.Rc901aLearnedBindings };
                             }
                         }
                         else
@@ -629,6 +660,7 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
             nextSettings,
             _cancellation.Token);
         _settings = nextSettings;
+        Interlocked.Increment(ref _configurationRevision);
         _rc901aAdapter?.ResetInputState();
         RebuildRuntime();
         _stateDirty = true;
@@ -684,7 +716,7 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
             Rc901aConnectionState.Connected or
             Rc901aConnectionState.ConnectedLimited;
 
-    private async Task UpdateSettingsAsync(JsonElement payload)
+    private void UpdateSettings(JsonElement payload)
     {
         var previousControllerType = _settings.ControllerType;
         var previousLightbarEnabled = _settings.CodexLightbarEnabled;
@@ -698,13 +730,7 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
             controllerType = parsedControllerType;
         }
 
-        if (controllerType != previousControllerType &&
-            DisconnectRc901aLearning())
-        {
-            _rc901aAdapter?.ResetInputState();
-        }
-
-        _settings = _settings with
+        var nextSettings = _settings with
         {
             ControllerType = controllerType,
             CodexOnly = payload.GetProperty("codexOnly").GetBoolean(),
@@ -718,8 +744,14 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
                 ? lightbarEnabled.GetBoolean()
                 : previousLightbarEnabled,
         };
+        var previousStartWithWindows = _settings.StartWithWindows;
+        _settings = nextSettings;
+        Interlocked.Increment(ref _configurationRevision);
+        if (controllerType != previousControllerType && DisconnectRc901aLearning())
+            _rc901aAdapter?.ResetInputState();
         _stateDirty = true;
 
+        UpdateActiveProfile();
         if (controllerType != previousControllerType)
         {
             RebuildRuntime();
@@ -731,95 +763,153 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
         }
 
         var executablePath = Environment.ProcessPath;
-        if (executablePath is not null)
+        if (executablePath is not null && previousStartWithWindows != _settings.StartWithWindows)
         {
             new StartupManager().SetEnabled(_settings.StartWithWindows, executablePath);
         }
-        await _settingsStore.SaveAsync(_settings, _cancellation.Token);
+        QueueSettingsSave();
     }
 
-    private async Task UpdateMappingAsync(JsonElement payload)
+    private void UpdateMapping(JsonElement payload)
     {
+        if (!TryMappingAgent(payload, out var agent)) return;
+        var values = payload.TryGetProperty("mappings", out var nested) ? nested : payload;
         var mappings = new List<KeyValuePair<ControllerControl, MappedAction>>();
-        foreach (var property in payload.EnumerateObject())
+        foreach (var property in values.EnumerateObject())
         {
-            if (TryControl(property.Name, out var control) &&
-                MappedActionCodec.TryParse(property.Value.GetString(), out var action))
+            if (TryControl(property.Name, out var control))
             {
+                if (!MappedActionCodec.TryParse(property.Value.GetString(), out var action))
+                    throw new InvalidOperationException("无效的映射操作");
+                if (!MappingEngine.AllowsAction(control, action.Kind))
+                    throw new InvalidOperationException("连续轴仅可绑定移动、滚动或不执行操作");
+                if (action.Kind == MappedActionKind.KeyboardShortcut)
+                    _ = KeyboardInputBuilder.Build(action.Shortcut!);
                 mappings.Add(new(control, action));
             }
         }
-        _settings = _settings with { Profile = _settings.Profile.WithMappings(mappings) };
+        var profile = _settings.GetProfile(agent).WithMappings(mappings);
+        var nextSettings = agent == AgentTarget.Codex
+            ? _settings with { Profile = profile }
+            : _settings with { DeepSeekHarnessProfile = profile };
+        _settings = nextSettings;
         _stateDirty = true;
-        _runtime?.UpdateProfile(_settings.Profile);
-        await _settingsStore.SaveAsync(_settings, _cancellation.Token);
+        UpdateActiveProfile();
+        Interlocked.Increment(ref _configurationRevision);
+        QueueSettingsSave();
     }
 
-    private static string? DescribeLastAction(
-        RuntimeTickResult result,
-        ControllerType controllerType)
+    private static bool TryMappingAgent(JsonElement payload, out AgentTarget agent)
+    {
+        agent = AgentTarget.Codex;
+        return !payload.TryGetProperty("agent", out var value) ||
+            (Enum.TryParse(value.GetString(), true, out agent) && Enum.IsDefined(agent));
+    }
+
+    private void ResetMappings(JsonElement payload)
+    {
+        if (!TryMappingAgent(payload, out var agent)) return;
+        var defaults = agent == AgentTarget.Codex ? DefaultProfileFactory.Create() : DefaultProfileFactory.CreateDeepSeekHarness();
+        var profile = defaults;
+        if (payload.TryGetProperty("control", out var item))
+        {
+            if (!TryControl(item.GetString() ?? "", out var control) || !defaults.TryGetAction(control, out var action))
+                throw new InvalidOperationException("无法重置该按键");
+            profile = _settings.GetProfile(agent).WithMapping(control, action);
+        }
+        var nextSettings = agent == AgentTarget.Codex ? _settings with { Profile = profile }
+            : _settings with { DeepSeekHarnessProfile = profile };
+        _settings = nextSettings;
+        _stateDirty = true;
+        UpdateActiveProfile();
+        Interlocked.Increment(ref _configurationRevision);
+        QueueSettingsSave();
+    }
+
+    private void QueueSettingsSave()
+    {
+        _settingsSavePending = true;
+        _settingsSaveTask ??= PersistSettingsAsync();
+    }
+
+    public Task FlushSettingsAsync() => _settingsSaveTask ?? Task.CompletedTask;
+
+    private async Task PersistSettingsAsync()
+    {
+        while (true)
+        {
+            await Task.Delay(200).ConfigureAwait(false);
+            await _settingsWriteGate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                await _gate.WaitAsync().ConfigureAwait(false);
+                AppSettings snapshot;
+                try { snapshot = _settings; _settingsSavePending = false; }
+                finally { _gate.Release(); }
+                string? error = null;
+                try { await _settingsStore.SaveAsync(snapshot, CancellationToken.None).ConfigureAwait(false); }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                    error = exception.Message;
+                }
+                StateJsonReady?.Invoke(BridgeJson.Serialize(new BridgeMessage<SettingsPersistencePayload>(
+                    1, "settingsPersistence", new(error))));
+            }
+            finally { _settingsWriteGate.Release(); }
+
+            await _gate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                if (!_settingsSavePending) { _settingsSaveTask = null; return; }
+            }
+            finally { _gate.Release(); }
+        }
+    }
+
+    private void UpdateActiveProfile()
+    {
+        var foreground = _foregroundAppService.GetForegroundAgent();
+        if (_foregroundAgent != foreground) _stateDirty = true;
+        _foregroundAgent = foreground;
+        var agent = _settings.CodexOnly
+            ? foreground ?? AgentTarget.Codex
+            : AgentTarget.Codex;
+        if (_activeAgent != agent) _stateDirty = true;
+        _activeAgent = agent;
+        var profile = _settings.GetProfile(agent);
+        if (ReferenceEquals(_runtimeProfile, profile)) return;
+        _runtime?.UpdateProfile(profile);
+        _runtimeProfile = profile;
+    }
+
+    private RecentActionPayload? BuildRecentAction(RuntimeTickResult result)
     {
         var dispatch = result.DispatchResults.LastOrDefault();
-        if (dispatch is not null && dispatch.Status != ActionDispatchStatus.Dispatched)
+        if (dispatch?.Invocation is { } invocation)
         {
-            return dispatch.Message;
+            if (invocation.Input.Edge == InputEdge.Changed && MathF.Abs(invocation.Input.Value) < 0.001f) return null;
+            return new(FormatControl(invocation.Input.Control), MappedActionCodec.Format(invocation.Action),
+                dispatch.Status.ToString().ToLowerInvariant(), dispatch.Message, _activeAgent, _settings.ControllerType);
         }
-        var input = result.InputEvents.LastOrDefault(item =>
-            item.Edge == InputEdge.Pressed ||
-            item is
-            {
-                Edge: InputEdge.Changed,
-                Control: ControllerControl.TouchpadX or ControllerControl.TouchpadY,
-            });
+        var input = result.InputEvents.LastOrDefault(item => item.Edge != InputEdge.Released &&
+            (item.Edge != InputEdge.Changed || MathF.Abs(item.Value) >= 0.001f));
         if (input is null) return null;
-        if (controllerType == ControllerType.PlayStation5)
+        var status = result.State.TestMode ? "test" : !result.State.MappingEnabled ? "paused" : "unmapped";
+        var message = status switch
         {
-            return input.Control switch
-            {
-                ControllerControl.X => "□ 方块键 → 切换听写快捷键",
-                ControllerControl.A => "× 叉键 → 发送消息",
-                ControllerControl.B => "○ 圆圈键 → Backspace（删除上一个字符）",
-                ControllerControl.Y => "△ 三角键 → 打开命令菜单",
-                ControllerControl.Menu => "Options → 激活 Codex 窗口",
-                ControllerControl.LeftBumper => "L1 → 上一个任务",
-                ControllerControl.RightBumper => "R1 → 下一项任务",
-                ControllerControl.TouchpadX or ControllerControl.TouchpadY =>
-                    "触控板滑动 → 移动鼠标光标",
-                ControllerControl.TouchpadButton => "触控板按下 → 鼠标左键单击",
-                _ => DescribeSharedControl(input.Control),
-            };
-        }
-
-        return input.Control switch
-        {
-            ControllerControl.X => "X → 切换听写快捷键",
-            ControllerControl.A => "A → 发送消息",
-            ControllerControl.B => "B → Backspace（删除上一个字符）",
-            ControllerControl.Y => "Y → 打开命令菜单",
-            ControllerControl.Menu => "菜单键 → 激活 Codex 窗口",
-            ControllerControl.LeftBumper => "LB → 上一个任务",
-            ControllerControl.RightBumper => "RB → 下一项任务",
-            _ => DescribeSharedControl(input.Control),
+            "test" => "仅检测输入，未执行操作",
+            "paused" => "映射已暂停，未执行操作",
+            _ => "未绑定可执行操作",
         };
+        return new(FormatControl(input.Control), null, status, message, _activeAgent, _settings.ControllerType);
     }
-
-    private static string DescribeSharedControl(ControllerControl control) => control switch
-    {
-        ControllerControl.DPadLeft => "方向键左 → 降低推理强度",
-        ControllerControl.DPadRight => "方向键右 → 提高推理强度",
-        ControllerControl.DPadUp => "方向键上 → ↑（ArrowUp）",
-        ControllerControl.DPadDown => "方向键下 → ↓（ArrowDown）",
-        ControllerControl.RightStickLeft => "右摇杆左 → ←（ArrowLeft）",
-        ControllerControl.RightStickRight => "右摇杆右 → →（ArrowRight）",
-        ControllerControl.RightStickUp => "右摇杆上 → ↑（ArrowUp）",
-        ControllerControl.RightStickDown => "右摇杆下 → ↓（ArrowDown）",
-        _ => $"{control} → 已触发",
-    };
 
     private void RefreshIntegrations()
     {
         var timestamp = DateTimeOffset.UtcNow;
         _microphoneStatus = _audioInputDetector.Detect();
+        _deepSeekShortcuts = _deepSeekShortcutResolver.GetShortcuts();
+        _codexShortcuts = _codexShortcutResolver.GetShortcuts();
         ConfigureCodexHooks();
 
         _codexActivity = _codexActivityStore.ReadStatus(timestamp);
@@ -848,7 +938,7 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
         }
     }
 
-    private bool PollCodexActivity(DateTimeOffset timestamp)
+    private bool PollIntegrations(DateTimeOffset timestamp)
     {
         if (timestamp < _nextIntegrationPoll)
         {
@@ -857,9 +947,15 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
 
         _nextIntegrationPoll = timestamp.Add(IntegrationPollInterval);
         var activity = _codexActivityStore.ReadStatus(timestamp);
+        var shortcuts = _deepSeekShortcutResolver.GetShortcuts();
+        var codexShortcuts = _codexShortcutResolver.GetShortcuts();
+        var shortcutsChanged = _deepSeekShortcuts is null || !_deepSeekShortcuts.SequenceEqual(shortcuts) ||
+            _codexShortcuts is null || !_codexShortcuts.SequenceEqual(codexShortcuts);
+        _deepSeekShortcuts = shortcuts;
+        _codexShortcuts = codexShortcuts;
         if (activity == _codexActivity)
         {
-            return false;
+            return shortcutsChanged;
         }
 
         _codexActivity = activity;
@@ -886,12 +982,13 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
 
     private RuntimeConfigurationPayload BuildConfiguration()
     {
-        if (!ReferenceEquals(_formattedProfile, _settings.Profile))
+        var profile = _settings.GetProfile(_activeAgent);
+        if (!ReferenceEquals(_formattedProfile, profile))
         {
-            _formattedMappings = _settings.Profile.Mappings.ToDictionary(
+            _formattedMappings = profile.Mappings.ToDictionary(
                 pair => FormatControl(pair.Key),
                 pair => MappedActionCodec.Format(pair.Value));
-            _formattedProfile = _settings.Profile;
+            _formattedProfile = profile;
         }
 
         return new RuntimeConfigurationPayload(
@@ -909,8 +1006,22 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
             _codexHookStatus,
             _codexActivity,
             _rc901aStatus,
-            BuildRc901aInputStatus());
+            BuildRc901aInputStatus(),
+            new Dictionary<string, IReadOnlyDictionary<string, string>>
+            {
+                ["codex"] = FormatMappings(_settings.Profile),
+                ["deepSeekHarness"] = FormatMappings(_settings.DeepSeekHarnessProfile),
+            },
+            _activeAgent,
+            new Dictionary<string, IReadOnlyList<AgentShortcutOption>>
+            {
+                ["codex"] = _codexShortcuts ??= _codexShortcutResolver.GetShortcuts(),
+                ["deepSeekHarness"] = _deepSeekShortcuts ??= _deepSeekShortcutResolver.GetShortcuts(),
+            }, Interlocked.Read(ref _configurationRevision), _foregroundAgent);
     }
+
+    private static IReadOnlyDictionary<string, string> FormatMappings(MappingProfile profile) =>
+        profile.Mappings.ToDictionary(pair => FormatControl(pair.Key), pair => MappedActionCodec.Format(pair.Value));
 
     private static bool TryControl(string name, out ControllerControl control)
     {
@@ -1050,6 +1161,7 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
     {
         UnsubscribeFromRc901aInput();
         _cancellation.Cancel();
+        await FlushSettingsAsync();
         if (_loop is not null)
         {
             try { await _loop; } catch (OperationCanceledException) { }

@@ -10,7 +10,7 @@ public enum ActionDispatchStatus
     Failed,
 }
 
-public sealed record ActionDispatchResult(ActionDispatchStatus Status, string Message);
+public sealed record ActionDispatchResult(ActionDispatchStatus Status, string Message, ActionInvocation? Invocation = null);
 
 public sealed class ActionDispatcher
 {
@@ -33,15 +33,16 @@ public sealed class ActionDispatcher
         var bypassesForegroundGuard =
             invocation.Action.Kind is
                 MappedActionKind.ActivateCodex or
+                MappedActionKind.ActivateDeepSeekHarness or
                 MappedActionKind.CodexDictation;
 
         if (options.CodexOnly &&
             !bypassesForegroundGuard &&
-            !_foregroundAppService.IsCodexForeground())
+            _foregroundAppService.GetForegroundAgent() != options.TargetAgent)
         {
             return new ActionDispatchResult(
                 ActionDispatchStatus.Blocked,
-                "Codex 未处于前台，动作未发送");
+                "目标应用未处于前台，动作未发送", invocation);
         }
 
         try
@@ -49,7 +50,7 @@ public sealed class ActionDispatcher
             await _executor.ExecuteAsync(invocation, options, cancellationToken);
             return new ActionDispatchResult(
                 ActionDispatchStatus.Dispatched,
-                "动作已派发");
+                "输入已发出", invocation);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -59,7 +60,7 @@ public sealed class ActionDispatcher
         {
             return new ActionDispatchResult(
                 ActionDispatchStatus.Failed,
-                $"输入未发送：{exception.Message}");
+                $"输入未发送：{exception.Message}", invocation);
         }
     }
 }

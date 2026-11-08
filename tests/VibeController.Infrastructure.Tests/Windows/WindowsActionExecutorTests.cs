@@ -7,6 +7,61 @@ namespace VibeController.Infrastructure.Tests.Windows;
 
 public sealed class WindowsActionExecutorTests
 {
+    [Fact]
+    public async Task Execute_DeepSeekCommandReadsItsCurrentBindingAndNeverReadsCodex()
+    {
+        var input = new FakeWindowsInputApi();
+        var codex = new FakeCodexShortcutResolver(new InvalidOperationException("must not resolve"));
+        var deepSeek = new FakeDeepSeekShortcutResolver();
+        var executor = new WindowsActionExecutor(input, new FakeCodexWindowService(), codex, deepSeek);
+        var invocation = Invocation(new MappedAction(MappedActionKind.DeepSeekCommand, CommandId: "session.search"));
+        var options = Options with { TargetAgent = AgentTarget.DeepSeekHarness };
+        await executor.ExecuteAsync(invocation, options);
+        deepSeek.Key = "L";
+        await executor.ExecuteAsync(invocation, options);
+        Assert.Empty(codex.RequestedActions);
+        Assert.Contains(input.KeyboardSequences[0], stroke => stroke.Key == VirtualKey.J);
+        Assert.Contains(input.KeyboardSequences[1], stroke => stroke.Key == VirtualKey.L);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => executor.ExecuteAsync(invocation, Options));
+        Assert.Equal(2, input.KeyboardSequences.Count);
+    }
+
+    private sealed class FakeDeepSeekShortcutResolver : IDeepSeekShortcutResolver
+    {
+        public string Key { get; set; } = "J";
+        public KeyboardShortcut Resolve(string commandId)
+        {
+            Assert.Equal("session.search", commandId);
+            return new KeyboardShortcut(Key, [KeyModifier.Control]);
+        }
+        public IReadOnlyList<VibeController.Core.Runtime.AgentShortcutOption> GetShortcuts() => [];
+    }
+
+    [Fact]
+    public async Task Execute_DeepSeekCustomShortcutNeverReadsCodexBindings()
+    {
+        var input = new FakeWindowsInputApi();
+        var resolver = new FakeCodexShortcutResolver(new InvalidOperationException("must not resolve"));
+        var executor = new WindowsActionExecutor(input, new FakeCodexWindowService(), resolver);
+        await executor.ExecuteAsync(Invocation(new MappedAction(MappedActionKind.KeyboardShortcut,
+            new KeyboardShortcut("J", [KeyModifier.Control]))),
+            Options with { TargetAgent = AgentTarget.DeepSeekHarness });
+        Assert.Empty(resolver.RequestedActions);
+        Assert.Single(input.KeyboardSequences);
+    }
+
+    [Fact]
+    public async Task Execute_DeepSeekActivationUsesItsOwnWindow()
+    {
+        var windows = new FakeCodexWindowService();
+        var executor = new WindowsActionExecutor(new FakeWindowsInputApi(), windows,
+            new FakeCodexShortcutResolver(new InvalidOperationException("must not resolve")));
+        await executor.ExecuteAsync(Invocation(new MappedAction(MappedActionKind.ActivateDeepSeekHarness)),
+            Options with { TargetAgent = AgentTarget.DeepSeekHarness });
+        Assert.Equal(1, windows.DeepSeekActivationCount);
+        Assert.Equal(0, windows.ActivationCount);
+    }
+
     private static readonly ActionExecutionOptions Options = new(
         CodexOnly: true,
         DictationShortcut: new KeyboardShortcut("D", [KeyModifier.Control, KeyModifier.Shift]),
@@ -263,6 +318,13 @@ public sealed class WindowsActionExecutorTests
     private sealed class FakeCodexWindowService : ICodexWindowService
     {
         public int ActivationCount { get; private set; }
+        public int DeepSeekActivationCount { get; private set; }
+
+        public bool TryActivateDeepSeekHarness()
+        {
+            DeepSeekActivationCount++;
+            return true;
+        }
 
         public bool IsCodexForeground() => false;
 

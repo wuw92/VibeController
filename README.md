@@ -2,8 +2,8 @@
 
 <div align="center">
 
-**把 Xbox / PS5 手柄和 TCL 遥控器变成 Codex 的轻量控制器。**<br>
-**Turn Xbox / PS5 controllers and a TCL remote into lightweight controls for Codex.**
+**把 Xbox / PS5 手柄和 TCL 遥控器变成 Codex / DeepSeek Harness 的轻量控制器。**<br>
+**Turn Xbox / PS5 controllers and a TCL remote into lightweight controls for Codex / DeepSeek Harness.**
 
 [![CI](https://github.com/Mrjie7205/VibeController/actions/workflows/ci.yml/badge.svg)](https://github.com/Mrjie7205/VibeController/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/Mrjie7205/VibeController)](https://github.com/Mrjie7205/VibeController/releases/latest)
@@ -25,14 +25,14 @@ VibeController 是一款面向 Windows 的开源桌面工具。它读取 Xbox Se
 
 - 支持 Xbox Wireless Controller（XInput，控制器 1–4）和 PS5 DualSense（USB / 蓝牙 HID）。
 - 实验性支持 TCL BT_RC901A_B1：固件 `V1.0.192.6` 已完成 22 个非电源键实机验收，默认自动识别；高级学习模式用于兼容其他固件。
-- Codex 语义动作不是写死的快捷键：首次触发时读取 Codex 当前快捷键，并在配置变化后自动刷新。
+- Codex 与 DeepSeek Harness 的应用操作在启动时读取当前快捷键，配置变化后自动同步；映射页单独显示当前键位与来源。
 - 支持听写、发送、命令菜单、任务/最近任务/标签页切换和推理强度调节。
 - 左摇杆移动鼠标，扳机键点击；DualSense 触控板移动鼠标，按下执行左键单击。
 - Xbox 与 DualSense 摇杆都按运行帧持续输出，按住移动时不会因 HID 报告抖动阈值而断续。
 - 右摇杆模拟方向键，可按住连续移动输入框光标。
 - 设置页可检查 Windows 默认录音端点，并提示 DualSense 麦克风是否实际暴露给系统。
 - 可选的 Codex Hook 状态桥接：DualSense 灯条用蓝色、琥珀色和绿色表示工作中、等待操作和已完成。
-- 默认只在 Codex 位于前台时注入输入，另有暂停映射和无注入测试模式。
+- Input map 可分别配置 Codex 与 DeepSeek Harness；前台限定模式自动使用对应应用的映射，关闭“仅在目标应用前台时执行”后全局使用 Codex 映射。
 - 本地 JSON 配置、系统托盘、自动重连和开机启动选项。
 
 ### TCL RC901A 实验性支持
@@ -61,6 +61,18 @@ Windows 可能为该遥控器显示“驱动程序错误”。已确认这是 Wi
 6. 启动 Codex；按 Menu / Options 激活窗口，退出测试模式后即可执行映射。
 
 当前二进制尚未进行代码签名，因此 Windows SmartScreen 可能显示警告。请只从本仓库 Release 下载并核对 SHA-256。
+
+### Agent 映射
+
+当前源码支持 DeepSeek Harness 独立桌面应用。在 Input map 的“配置 Agent”中选择应用，直接修改该应用的按键映射；恢复默认仅影响所选 Agent。修改即生效并自动保存，无需再点击保存按钮。
+
+两个 Agent 使用相同的配置流程：下拉菜单只选择操作名称，当前生效的快捷键及默认、自定义或固定来源单独显示。启动时读取应用设置，配置变化后自动同步，无需手动刷新。修改后立即应用，后台合并保存；正常操作不显示保存流程，只有真实异常才提示。关闭应用时会完成待写入的设置。
+
+连续轴采用固定的移动、滚动和不执行选项，具体规则见 [MappingEngine](src/VibeController.Core/Mapping/MappingEngine.cs)。状态页区分可执行、等待目标应用、测试和暂停，最近记录来自实际输入及派发结果。重置可以作用于当前按键或所选 Agent 的全部映射，并提供一次撤销；重复绑定作为说明，不视为禁止使用的冲突。
+
+状态页用于确认设备与执行状态，映射页只编辑操作和键位，设置页集中管理设备与偏好。映射编辑器随内容展开，长按键列表独立滚动；设置中的说明和高级诊断按需展开，收到新诊断数据不会自动打开面板。
+
+常用操作与键位读取见 [CodexShortcutResolver](src/VibeController.Infrastructure/Windows/CodexShortcutResolver.cs)、[DeepSeekShortcutResolver](src/VibeController.Infrastructure/Windows/DeepSeekShortcutResolver.cs)；DSH 命令目录以 [DeepSeekShortcutCatalog](src/VibeController.Infrastructure/Windows/DeepSeekShortcutCatalog.cs) 为准。手柄默认映射见 [DefaultProfileFactory](src/VibeController.Core/Mapping/DefaultProfileFactory.cs)，前台识别见 [窗口服务](src/VibeController.Infrastructure/Windows/CodexWindowService.cs)。既有映射保留。
 
 ### Codex 快捷键自动同步
 
@@ -172,7 +184,7 @@ VibeController is an open-source Windows desktop utility that turns input from X
 - Xbox Wireless Controller support through XInput (controller slots 1–4).
 - PS5 DualSense support through native Windows USB/Bluetooth HID, including the touchpad.
 - Experimental TCL BT_RC901A_B1 support with a hardware-verified 22-button profile for firmware `V1.0.192.6`; advanced learning remains available for other firmware.
-- Codex semantic actions resolve the user's current Codex shortcuts on first use and refresh after the file changes—no universal hard-coded shortcut assumptions.
+- Codex and DeepSeek Harness actions load their current shortcuts at startup and follow configuration changes automatically. Operation names and effective keys are displayed separately.
 - Dictation, submit, command menu, thread/recent-thread/tab navigation, and reasoning-effort actions.
 - Left stick mouse movement, trigger clicks, right-stick arrow-key repeat, and DualSense touchpad mouse control.
 - Continuous per-frame stick output for both Xbox and DualSense, avoiding choppy held movement caused by HID jitter thresholds.
@@ -206,7 +218,7 @@ The v1.1.0 binaries are currently unsigned, so Windows SmartScreen may warn. Dow
 
 ### Codex shortcut synchronization
 
-For a Codex action, VibeController reads the shortcut on first use from `$CODEX_HOME\keybindings.json`, or `%USERPROFILE%\.codex\keybindings.json` when `CODEX_HOME` is unset. Custom Codex bindings override defaults and the file is reloaded after it changes.
+Changes apply immediately and persist automatically in the background. Select an agent and an operation in Input map; the effective shortcut and its source appear separately from the operation menu. Both agents load shortcuts at startup and follow configuration changes automatically. Custom application bindings override defaults. See [CodexShortcutResolver](src/VibeController.Infrastructure/Windows/CodexShortcutResolver.cs) and [DeepSeekShortcutResolver](src/VibeController.Infrastructure/Windows/DeepSeekShortcutResolver.cs) for the authoritative configuration entry points.
 
 If an action is explicitly unbound, has no Codex default, or uses an unsupported accelerator format, VibeController reports the problem instead of injecting a stale fallback. Codex commonly has no default binding for **Toggle Dictation** or **Increase/Decrease Reasoning Effort**; bind those actions once under **Codex → Settings → Keyboard Shortcuts**. Each user may choose different combinations.
 

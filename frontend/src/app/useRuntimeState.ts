@@ -30,7 +30,7 @@ export function mergeRuntimeUpdate(
   return {
     ...current,
     ...runtime,
-    ...(configuration ? {
+    ...(configuration && (configuration.revision ?? current.configuration?.revision ?? 0) >= (current.configuration?.revision ?? 0) ? {
       configuration: { ...current.configuration, ...configuration },
     } : {}),
   };
@@ -47,7 +47,9 @@ export function useRuntimeState() {
     let pending: RuntimeStateUpdate | undefined;
     let frame: number | undefined;
     const unsubscribe = appBridge.subscribe((message) => {
-      pending = mergeRuntimeUpdate(pending ?? {}, message.payload);
+      if (message.type === "settingsPersistence") return;
+      const update = message.type === "commandResult" ? { configuration: message.payload.configuration } : message.payload;
+      pending = mergeRuntimeUpdate(pending ?? {}, update);
       if (frame !== undefined) return;
       frame = window.requestAnimationFrame(() => {
         const update = pending!;

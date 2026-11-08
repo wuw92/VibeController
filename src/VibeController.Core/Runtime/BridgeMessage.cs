@@ -7,6 +7,11 @@ namespace VibeController.Core.Runtime;
 
 public sealed record BridgeMessage<T>(int Version, string Type, T Payload);
 
+public sealed record CommandResultPayload(string RequestId, bool Succeeded,
+    RuntimeConfigurationPayload Configuration, string? Error = null);
+
+public sealed record SettingsPersistencePayload(string? Error);
+
 public sealed record RuntimeStatePayload(
     string ConnectionState,
     int ControllerIndex,
@@ -16,7 +21,11 @@ public sealed record RuntimeStatePayload(
     IReadOnlyDictionary<string, float> Controls,
     string? LastAction,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    RuntimeConfigurationPayload? Configuration = null);
+    RuntimeConfigurationPayload? Configuration = null,
+    RecentActionPayload? RecentAction = null);
+
+public sealed record RecentActionPayload(string Control, string? Action, string Status,
+    string? Message, AgentTarget Agent, ControllerType ControllerType);
 
 public sealed record RuntimeConfigurationPayload(
     ControllerType ControllerType,
@@ -33,7 +42,19 @@ public sealed record RuntimeConfigurationPayload(
     CodexHookRegistrationStatus? CodexHook = null,
     CodexActivityStatus? CodexActivity = null,
     Rc901aStatus? Rc901a = null,
-    Rc901aInputStatus? Rc901aInput = null);
+    Rc901aInputStatus? Rc901aInput = null,
+    IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>? AgentMappings = null,
+    AgentTarget ActiveAgent = AgentTarget.Codex,
+    IReadOnlyDictionary<string, IReadOnlyList<AgentShortcutOption>>? AgentShortcuts = null,
+    long Revision = 0,
+    AgentTarget? ForegroundAgent = null);
+
+public sealed record AgentShortcutOption(
+    string Value,
+    string Label,
+    string? Shortcut,
+    string Source,
+    string? Message = null);
 
 public sealed record Rc901aInputStatus(
     IReadOnlyList<Rc901aInputBinding> Bindings,
@@ -45,7 +66,8 @@ public static class BridgeMessageFactory
     public static BridgeMessage<RuntimeStatePayload> RuntimeState(
         RuntimeState state,
         string? lastAction,
-        RuntimeConfigurationPayload? configuration = null)
+        RuntimeConfigurationPayload? configuration = null,
+        RecentActionPayload? recentAction = null)
     {
         var controls = state.Snapshot.Controls.ToDictionary(
             control => CamelCase(control.ToString()),
@@ -63,7 +85,8 @@ public static class BridgeMessageFactory
                 state.PacketNumber,
                 controls,
                 lastAction,
-                configuration));
+                configuration,
+                recentAction));
     }
 
     private static string CamelCase(string value) =>

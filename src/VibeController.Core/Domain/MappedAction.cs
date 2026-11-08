@@ -28,6 +28,8 @@ public enum MappedActionKind
     MouseScrollUp,
     MouseScrollDown,
     None,
+    ActivateDeepSeekHarness,
+    DeepSeekCommand,
 }
 
 public enum KeyModifier
@@ -53,8 +55,11 @@ public sealed record KeyboardShortcut
     public string Key { get; init; } = string.Empty;
 
     public ImmutableArray<KeyModifier> Modifiers { get; init; } = [];
+
+    public string? SecondKey { get; init; }
 }
 
 public sealed record MappedAction(
     MappedActionKind Kind,
-    KeyboardShortcut? Shortcut = null);
+    KeyboardShortcut? Shortcut = null,
+    string? CommandId = null);

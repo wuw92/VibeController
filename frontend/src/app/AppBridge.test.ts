@@ -2,6 +2,23 @@ import { describe, expect, it, vi } from "vitest";
 import { createAppBridge } from "./AppBridge";
 
 describe("AppBridge", () => {
+  it("matches application replies to the correct change and removes its temporary listener", async () => {
+    const listeners = new Set<(event: MessageEvent) => void>();
+    const postMessage = vi.fn();
+    const bridge = createAppBridge({ postMessage,
+      addEventListener: (_, listener) => { listeners.add(listener); },
+      removeEventListener: (_, listener) => { listeners.delete(listener); },
+    });
+    const pending = bridge.request("updateMapping", { x: "send" });
+    const requestId = postMessage.mock.calls[0][0].requestId;
+    const reply = { requestId, succeeded: true, configuration: {}, error: null };
+    listeners.forEach((listener) => listener(new MessageEvent("message", { data: {
+      version: 1, type: "commandResult", payload: reply,
+    } })));
+    await expect(pending).resolves.toEqual(reply);
+    expect(listeners.size).toBe(0);
+  });
+
   it("publishes runtime state messages received from WebView2", () => {
     const listeners = new Set<(event: MessageEvent) => void>();
     const postMessage = vi.fn();

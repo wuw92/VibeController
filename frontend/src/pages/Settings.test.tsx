@@ -1,9 +1,19 @@
+import * as React from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Rc901aControl, Rc901aInputStatus } from "../app/types";
-import { Settings, type SettingsValues } from "./Settings";
+import { Settings as HostSettings, type SettingsValues } from "./Settings";
 
 afterEach(cleanup);
+
+
+const hostSettings: SettingsValues = { controllerType: "xbox", codexOnly: true, startWithWindows: false,
+  deadZone: 0.18, mouseSpeed: 50, scrollSpeed: 50, activeControllerIndex: 0,
+  dictationShortcut: "Ctrl+Alt+Shift+F12", codexLightbarEnabled: false };
+function Settings(props: React.ComponentProps<typeof HostSettings>) {
+  const [values, setValues] = React.useState(props.initialValues ?? hostSettings);
+  return <HostSettings {...props} initialValues={values} onSave={(next) => { setValues(next); props.onSave(next); }} />;
+}
 
 const verifiedControls: readonly Rc901aControl[] = [
   "remoteUp",
@@ -49,75 +59,33 @@ const verifiedRc901aInput: Rc901aInputStatus = {
 };
 
 describe("Settings", () => {
-  it("preserves slider edits after saving a controller selection through delayed acknowledgement", () => {
-    const onSave = vi.fn();
-    const onCopyDiagnostics = vi.fn();
-    const persisted: SettingsValues = {
-      controllerType: "xbox", codexOnly: true, startWithWindows: false,
-      deadZone: 0.25, mouseSpeed: 73, scrollSpeed: 37, activeControllerIndex: 2,
-      dictationShortcut: "Ctrl+K", codexLightbarEnabled: false,
-    };
-    const { rerender } = render(<Settings initialValues={persisted}
-      onSave={onSave} onCopyDiagnostics={onCopyDiagnostics} />);
-    fireEvent.click(screen.getByLabelText("PS5 DualSense"));
-    fireEvent.click(screen.getByLabelText("登录 Windows 后自动启动"));
-    fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
-    const submitted = { ...persisted, controllerType: "playStation5", startWithWindows: true };
-    expect(onSave).toHaveBeenLastCalledWith(submitted);
-
-    // App retains the old controller type until the host confirms it.
-    rerender(<Settings initialValues={{ ...persisted, startWithWindows: true }}
-      onSave={onSave} onCopyDiagnostics={onCopyDiagnostics} />);
-    expect(screen.getByLabelText("PS5 DualSense")).toBeChecked();
-    fireEvent.change(screen.getByLabelText("鼠标速度"), { target: { value: "91" } });
-    rerender(<Settings initialValues={{ ...submitted, controllerType: "playStation5" }}
-      onSave={onSave} onCopyDiagnostics={onCopyDiagnostics} />);
-    expect(screen.getByLabelText("鼠标速度")).toHaveValue("91");
-    expect(screen.getByLabelText("PS5 DualSense")).toBeChecked();
-
-    rerender(<Settings initialValues={{ ...submitted, controllerType: "playStation5" }}
-      onSave={onSave} onCopyDiagnostics={onCopyDiagnostics}
-      codexActivity={{ state: "working", lastEventAt: null, activeSessionCount: 1 }} />);
-    expect(screen.getByLabelText("鼠标速度")).toHaveValue("91");
-    fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
-    expect(onSave).toHaveBeenLastCalledWith({ ...submitted, mouseSpeed: 91 });
+  it("does not automatically expand raw diagnostics when new samples arrive", () => {
+    const values = { ...hostSettings, controllerType: "tclRc901a" as const };
+    const status = { connectionState: "connected" as const, deviceName: "RC901A", deviceId: "test",
+      batteryPercent: null, subscribedCharacteristicCount: 1, message: null, samples: [] };
+    const { rerender } = render(<Settings initialValues={values} rc901a={status} onSave={() => {}} onCopyDiagnostics={() => {}} />);
+    const details = screen.getByText(/原始输入数据/).closest("details")!;
+    expect(details).not.toHaveAttribute("open");
+    rerender(<Settings initialValues={values} rc901a={{ ...status, samples: [
+      { timestamp: "2026-11-08T00:00:00Z", serviceUuid: "service", characteristicUuid: "characteristic", dataHex: "01", length: 1 },
+    ] }} onSave={() => {}} onCopyDiagnostics={() => {}} />);
+    expect(details).not.toHaveAttribute("open");
   });
 
-  it("loads persisted settings arriving after mount and preserves edits through diagnostics refreshes", () => {
-    const onSave = vi.fn();
-    const onCopyDiagnostics = vi.fn();
-    const persisted: SettingsValues = {
-      controllerType: "playStation5", codexOnly: false, startWithWindows: true,
-      deadZone: 0.25, mouseSpeed: 73, scrollSpeed: 37, activeControllerIndex: 2,
-      dictationShortcut: "Ctrl+K", codexLightbarEnabled: true,
-    };
-    const { rerender } = render(<Settings onSave={onSave} onCopyDiagnostics={onCopyDiagnostics} />);
-    rerender(<Settings initialValues={persisted} onSave={onSave} onCopyDiagnostics={onCopyDiagnostics} />);
-    expect(screen.getByLabelText("PS5 DualSense")).toBeChecked();
-    expect(screen.getByLabelText("仅在 Codex 前台时执行")).not.toBeChecked();
-    expect(screen.getByLabelText("鼠标速度")).toHaveValue("73");
-
-    fireEvent.click(screen.getByLabelText("Xbox 无线手柄"));
-    rerender(<Settings initialValues={{ ...persisted }} onSave={onSave} onCopyDiagnostics={onCopyDiagnostics}
-      codexActivity={{ state: "working", lastEventAt: null, activeSessionCount: 1 }} />);
-    expect(screen.getByLabelText("Xbox 无线手柄")).toBeChecked();
-    fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
-    expect(onSave).toHaveBeenCalledWith({ ...persisted, controllerType: "xbox" });
-    rerender(<Settings initialValues={{ ...persisted, controllerType: "xbox" }}
-      onSave={onSave} onCopyDiagnostics={onCopyDiagnostics} />);
-
-    rerender(<Settings initialValues={{ ...persisted, mouseSpeed: 81 }}
-      onSave={onSave} onCopyDiagnostics={onCopyDiagnostics} />);
-    expect(screen.getByLabelText("PS5 DualSense")).toBeChecked();
+  it("renders new confirmed configuration without a second local settings copy", () => {
+    const props = { onSave: vi.fn(), onCopyDiagnostics: vi.fn() };
+    const { rerender } = render(<HostSettings {...props} />);
+    expect(screen.getByText("等待应用配置…")).toBeInTheDocument();
+    rerender(<HostSettings {...props} initialValues={{ ...hostSettings, mouseSpeed: 81 }} />);
     expect(screen.getByLabelText("鼠标速度")).toHaveValue("81");
+    expect(props.onSave).not.toHaveBeenCalled();
   });
 
-  it("explains that Codex shortcuts are read automatically instead of exposing a duplicate setting", () => {
+  it("keeps device choice first without duplicating the mapping explanation", () => {
     render(<Settings onSave={vi.fn()} onCopyDiagnostics={vi.fn()} />);
-
-    expect(screen.getByText("自动同步 Codex 快捷键")).toBeInTheDocument();
-    expect(screen.getByText(/首次触发 Codex 操作时读取当前用户的设置/)).toBeInTheDocument();
-    expect(screen.queryByLabelText("听写快捷键")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { level: 2 })[0]).toHaveTextContent("输入设备");
+    expect(screen.queryByText("应用快捷键自动同步")).not.toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "仅在目标应用前台时执行" })).toBeInTheDocument();
   });
 
   it("switches the active device family to PS5 DualSense", () => {
@@ -125,7 +93,6 @@ describe("Settings", () => {
     render(<Settings onSave={onSave} onCopyDiagnostics={vi.fn()} />);
 
     fireEvent.click(screen.getByLabelText("PS5 DualSense"));
-    fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
 
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
       controllerType: "playStation5",
@@ -141,7 +108,6 @@ describe("Settings", () => {
     expect(screen.queryByLabelText("活动控制器")).not.toBeInTheDocument();
     expect(screen.getByText("Windows HID")).toBeInTheDocument();
     expect(screen.queryByText("直接 BLE 模式")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
       controllerType: "tclRc901a",
     }));
@@ -255,7 +221,7 @@ describe("Settings", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "兼容性按键识别" }));
-    expect(screen.getByText("先保存设备设置")).toBeInTheDocument();
+    expect(screen.getByText("正在切换设备，请稍候")).toBeInTheDocument();
     const learnMic = screen.getByRole("button", { name: "识别麦克风键" });
     expect(learnMic).toBeDisabled();
     fireEvent.click(learnMic);
@@ -294,11 +260,10 @@ describe("Settings", () => {
     const onSave = vi.fn();
     render(<Settings onSave={onSave} onCopyDiagnostics={vi.fn()} />);
 
-    fireEvent.click(screen.getByLabelText("仅在 Codex 前台时执行"));
+    fireEvent.click(screen.getByLabelText("仅在目标应用前台时执行"));
     fireEvent.click(screen.getByLabelText("登录 Windows 后自动启动"));
     fireEvent.change(screen.getByLabelText("摇杆死区"), { target: { value: "22" } });
     fireEvent.change(screen.getByLabelText("活动控制器"), { target: { value: "2" } });
-    fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
 
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
       codexOnly: false,
@@ -312,6 +277,7 @@ describe("Settings", () => {
   it("copies diagnostics", () => {
     const onCopyDiagnostics = vi.fn();
     render(<Settings onSave={vi.fn()} onCopyDiagnostics={onCopyDiagnostics} />);
+    fireEvent.click(screen.getByText("高级诊断"));
     fireEvent.click(screen.getByRole("button", { name: "复制诊断信息" }));
     expect(onCopyDiagnostics).toHaveBeenCalledOnce();
   });
@@ -351,7 +317,6 @@ describe("Settings", () => {
     );
 
     fireEvent.click(screen.getByLabelText("使用 DualSense 灯条显示 Codex 状态"));
-    fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
 
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
       codexLightbarEnabled: true,
@@ -383,9 +348,8 @@ describe("Settings", () => {
       />,
     );
 
-    expect(screen.getByText("Hook 已安装 · 等待操作")).toBeInTheDocument();
+    expect(screen.getByText("已配置 · 等待操作")).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText("使用 DualSense 灯条显示 Codex 状态"));
-    fireEvent.click(screen.getByRole("button", { name: "保存设置" }));
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
       codexLightbarEnabled: false,
     }));

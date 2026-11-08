@@ -26,15 +26,18 @@ public sealed class WindowsActionExecutor : IActionExecutor
     private readonly IWindowsInputApi _input;
     private readonly ICodexWindowService _codexWindowService;
     private readonly ICodexShortcutResolver _codexShortcutResolver;
+    private readonly IDeepSeekShortcutResolver _deepSeekShortcutResolver;
 
     public WindowsActionExecutor(
         IWindowsInputApi input,
         ICodexWindowService codexWindowService,
-        ICodexShortcutResolver codexShortcutResolver)
+        ICodexShortcutResolver codexShortcutResolver,
+        IDeepSeekShortcutResolver? deepSeekShortcutResolver = null)
     {
         _input = input;
         _codexWindowService = codexWindowService;
         _codexShortcutResolver = codexShortcutResolver;
+        _deepSeekShortcutResolver = deepSeekShortcutResolver ?? new DeepSeekShortcutResolver();
     }
 
     public Task ExecuteAsync(
@@ -46,6 +49,20 @@ public sealed class WindowsActionExecutor : IActionExecutor
 
         switch (invocation.Action.Kind)
         {
+            case MappedActionKind.DeepSeekCommand:
+                if (options.TargetAgent != AgentTarget.DeepSeekHarness)
+                    throw new InvalidOperationException("DSH 操作仅用于 DeepSeek Harness 映射");
+                SendShortcut(_deepSeekShortcutResolver.Resolve(invocation.Action.CommandId ?? string.Empty));
+                break;
+            case MappedActionKind.Send when options.TargetAgent == AgentTarget.DeepSeekHarness:
+                SendShortcut(_deepSeekShortcutResolver.Resolve("fixed.send"));
+                break;
+            case MappedActionKind.ActivateDeepSeekHarness:
+                if (!_codexWindowService.TryActivateDeepSeekHarness())
+                {
+                    throw new InvalidOperationException("未找到正在运行的 DeepSeek Harness 窗口");
+                }
+                break;
             case MappedActionKind.ActivateCodex:
                 if (!_codexWindowService.TryActivateCodex())
                 {
@@ -64,6 +81,10 @@ public sealed class WindowsActionExecutor : IActionExecutor
             case MappedActionKind.NextTab:
             case MappedActionKind.IncreaseReasoning:
             case MappedActionKind.DecreaseReasoning:
+                if (options.TargetAgent != AgentTarget.Codex)
+                {
+                    throw new InvalidOperationException("请为 DeepSeek Harness 配置键盘快捷键");
+                }
                 SendShortcut(_codexShortcutResolver.Resolve(invocation.Action.Kind));
                 break;
             case MappedActionKind.Cancel:

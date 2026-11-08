@@ -2,7 +2,7 @@ using VibeController.Core.Devices;
 
 namespace VibeController.Infrastructure.Windows;
 
-public sealed class WindowsRc901aRawInputSource : IRc901aRawInputSource
+public sealed class WindowsRc901aRawInputSource : IRc901aRawInputSource, IAsyncDisposable
 {
     public const int InputMessage = WindowsRc901aRawInputBackend.InputMessage;
     public const int InputDeviceChangeMessage =
@@ -203,11 +203,13 @@ public sealed class WindowsRc901aRawInputSource : IRc901aRawInputSource
 
     private void PublishStatus() => StatusChanged?.Invoke(CurrentStatus);
 
-    public void Dispose()
+    public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
+
+    public ValueTask DisposeAsync()
     {
         if (_disposed)
         {
-            return;
+            return ValueTask.CompletedTask;
         }
 
         _disposed = true;
@@ -216,6 +218,6 @@ public sealed class WindowsRc901aRawInputSource : IRc901aRawInputSource
         _driverClient.AvailabilityChanged -= OnDriverAvailabilityChanged;
         _driverClient.InputReceived -= OnDriverInputReceived;
         _rawInput.Dispose();
-        _driverClient.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        return _driverClient.DisposeAsync();
     }
 }

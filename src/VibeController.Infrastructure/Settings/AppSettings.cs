@@ -33,6 +33,11 @@ public sealed record AppSettings
 
     public MappingProfile Profile { get; init; } = DefaultProfileFactory.Create();
 
+    public MappingProfile DeepSeekHarnessProfile { get; init; } = DefaultProfileFactory.CreateDeepSeekHarness();
+
+    public MappingProfile GetProfile(AgentTarget agent) => agent == AgentTarget.DeepSeekHarness
+        ? DeepSeekHarnessProfile : Profile;
+
     public IReadOnlyList<Rc901aInputBinding> Rc901aLearnedBindings { get; init; } = [];
 
     public static AppSettings CreateDefault() => new()

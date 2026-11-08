@@ -73,6 +73,7 @@ public sealed class SendInputNativeSender : INativeInputSender
 {
     private const uint InputMouse = 0;
     private const uint InputKeyboard = 1;
+    private const uint KeyEventExtendedKey = 0x0001;
     private const uint KeyEventKeyUp = 0x0002;
     private const uint MouseEventMove = 0x0001;
     private const uint MouseEventLeftDown = 0x0002;
@@ -83,6 +84,7 @@ public sealed class SendInputNativeSender : INativeInputSender
 
     public void SendKeyboardStroke(KeyboardInputStroke stroke)
     {
+        var scanCode = MapVirtualKey((uint)stroke.Key, 4);
         var input = new NativeInput
         {
             Type = InputKeyboard,
@@ -91,7 +93,9 @@ public sealed class SendInputNativeSender : INativeInputSender
                 Keyboard = new KeyboardInput
                 {
                     VirtualKey = (ushort)stroke.Key,
-                    Flags = stroke.Direction == KeyDirection.Up ? KeyEventKeyUp : 0,
+                    ScanCode = (ushort)(scanCode & 0xff),
+                    Flags = (stroke.Direction == KeyDirection.Up ? KeyEventKeyUp : 0) |
+                        ((scanCode & 0xff00) == 0xe000 ? KeyEventExtendedKey : 0),
                 },
             },
         };
@@ -149,6 +153,9 @@ public sealed class SendInputNativeSender : INativeInputSender
         uint inputCount,
         [In] NativeInput[] inputs,
         int inputSize);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern uint MapVirtualKey(uint code, uint mapType);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct NativeInput

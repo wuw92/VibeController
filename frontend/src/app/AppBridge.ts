@@ -1,4 +1,4 @@
-import type { BridgeCommand, CommandType, HostMessage } from "./types";
+import type { BridgeCommand, CommandResult, CommandType, HostMessage } from "./types";
 
 export interface WebViewLike {
   postMessage(message: unknown): void;
@@ -9,6 +9,7 @@ export interface WebViewLike {
 export interface AppBridge {
   subscribe(listener: (message: HostMessage) => void): () => void;
   send<TPayload>(type: CommandType, payload: TPayload): void;
+  request<TPayload>(type: CommandType, payload: TPayload): Promise<CommandResult>;
 }
 
 function isHostMessage(value: unknown): value is HostMessage {
@@ -17,11 +18,34 @@ function isHostMessage(value: unknown): value is HostMessage {
   }
 
   const message = value as Partial<HostMessage>;
-  return message.version === 1 && message.type === "runtimeState" && !!message.payload;
+  return message.version === 1 && ["runtimeState", "commandResult", "settingsPersistence"].includes(message.type ?? "") && !!message.payload;
 }
 
 export function createAppBridge(webview: WebViewLike): AppBridge {
+  let sequence = 0;
+  const requestPrefix = crypto.randomUUID();
+  const pending = new Map<string, (result: CommandResult) => void>();
+  const handleResult = (event: MessageEvent) => {
+    if (!isHostMessage(event.data) || event.data.type !== "commandResult") return;
+    const result = event.data.payload;
+    pending.get(result.requestId)?.(result);
+    pending.delete(result.requestId);
+    if (pending.size === 0) webview.removeEventListener("message", handleResult);
+  };
   return {
+    request(type, payload) {
+      const requestId = `${requestPrefix}-${++sequence}`;
+      return new Promise((resolve, reject) => {
+        if (pending.size === 0) webview.addEventListener("message", handleResult);
+        pending.set(requestId, resolve);
+        try { webview.postMessage({ version: 1, type, payload, requestId }); }
+        catch (error) {
+          pending.delete(requestId);
+          if (pending.size === 0) webview.removeEventListener("message", handleResult);
+          reject(error);
+        }
+      });
+    },
     subscribe(listener) {
       const handleMessage = (event: MessageEvent) => {
         if (isHostMessage(event.data)) {

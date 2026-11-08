@@ -7,7 +7,8 @@ public sealed record ActionExecutionOptions(
     bool CodexOnly,
     KeyboardShortcut DictationShortcut,
     float MouseSpeed,
-    float ScrollSpeed);
+    float ScrollSpeed,
+    AgentTarget TargetAgent = AgentTarget.Codex);
 
 public interface IActionExecutor
 {

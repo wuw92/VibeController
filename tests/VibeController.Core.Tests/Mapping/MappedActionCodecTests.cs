@@ -6,6 +6,16 @@ namespace VibeController.Core.Tests.Mapping;
 public sealed class MappedActionCodecTests
 {
     [Fact]
+    public void TryParse_PreservesDeepSeekCommandIdentityRatherThanFreezingItsCurrentKeys()
+    {
+        Assert.True(MappedActionCodec.TryParse("deepseek:session.search", out var action));
+        Assert.Equal(MappedActionKind.DeepSeekCommand, action.Kind);
+        Assert.Equal("session.search", action.CommandId);
+        Assert.Null(action.Shortcut);
+        Assert.Equal("deepseek:session.search", MappedActionCodec.Format(action));
+    }
+
+    [Fact]
     public void Core_ContainsSharedMappedActionCodec()
     {
         var codec = typeof(DefaultProfileFactory).Assembly.GetType(
@@ -24,6 +34,7 @@ public sealed class MappedActionCodecTests
     [InlineData("increaseReasoning", MappedActionKind.IncreaseReasoning)]
     [InlineData("decreaseReasoning", MappedActionKind.DecreaseReasoning)]
     [InlineData("activateCodex", MappedActionKind.ActivateCodex)]
+    [InlineData("activateDeepSeekHarness", MappedActionKind.ActivateDeepSeekHarness)]
     [InlineData("mouseMove", MappedActionKind.MouseMove)]
     [InlineData("mouseLeftClick", MappedActionKind.MouseLeftClick)]
     [InlineData("mouseRightClick", MappedActionKind.MouseRightClick)]
@@ -76,7 +87,6 @@ public sealed class MappedActionCodecTests
     [Theory]
     [InlineData("previousModel")]
     [InlineData("nextModel")]
-    [InlineData("mouseScroll")]
     public void TryParse_RejectsRemovedOrAmbiguousActions(string name)
     {
         Assert.False(MappedActionCodec.TryParse(name, out _));

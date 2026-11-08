@@ -110,11 +110,18 @@ public static class KeyboardInputBuilder
     {
         var modifierKeys = shortcut.Modifiers.Select(ToVirtualKey).ToArray();
         var key = ParseKey(shortcut.Key);
+        var second = shortcut.SecondKey is { } secondKey ? ParseKey(secondKey) : (VirtualKey?)null;
+        if (second == key) throw new ArgumentException("双键快捷键需要两个不同的按键", nameof(shortcut));
         var strokes = new List<KeyboardInputStroke>(modifierKeys.Length * 2 + 2);
 
         strokes.AddRange(modifierKeys.Select(modifier =>
             new KeyboardInputStroke(modifier, KeyDirection.Down)));
         strokes.Add(new KeyboardInputStroke(key, KeyDirection.Down));
+        if (second is { } chordKey)
+        {
+            strokes.Add(new KeyboardInputStroke(chordKey, KeyDirection.Down));
+            strokes.Add(new KeyboardInputStroke(chordKey, KeyDirection.Up));
+        }
         strokes.Add(new KeyboardInputStroke(key, KeyDirection.Up));
         strokes.AddRange(modifierKeys.Reverse().Select(modifier =>
             new KeyboardInputStroke(modifier, KeyDirection.Up)));

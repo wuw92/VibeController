@@ -27,6 +27,14 @@ function MappingEditor(props: ComponentProps<typeof HostMappingEditor>) {
 afterEach(cleanup);
 
 describe("MappingEditor", () => {
+  it("shows one editable shortcut without a duplicate result preview", () => {
+    render(<HostMappingEditor initialValues={{ x: "shortcut:Ctrl+Shift+F6" }} onSave={() => {}} onReset={() => {}} />);
+    expect(screen.getByLabelText("自定义快捷键")).toHaveValue("Ctrl+Shift+F6");
+    expect(screen.queryByText("触发结果")).not.toBeInTheDocument();
+    expect(screen.queryByText("正在编辑")).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "当前生效快捷键" })).not.toBeInTheDocument();
+  });
+
   it("offers fixed movement and scrolling choices for a continuous axis", () => {
     render(<MappingEditor onSave={() => {}} onReset={() => {}} />);
     fireEvent.click(screen.getByRole("button", { name: "左摇杆横轴" }));
@@ -163,11 +171,11 @@ describe("MappingEditor", () => {
   it("explains automatic Codex shortcut lookup only for Codex semantic actions", () => {
     render(<MappingEditor onSave={vi.fn()} onReset={vi.fn()} />);
 
-    expect(screen.getByText("由 Codex 管理，设置变化后自动同步。")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "当前生效快捷键" })).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("绑定操作"), { target: { value: "keyboardShortcut" } });
 
-    expect(screen.queryByText("由 Codex 管理，设置变化后自动同步。")).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "当前生效快捷键" })).not.toBeInTheDocument();
   });
 
   it("offers recent-task and tab navigation without changing the default bindings", () => {

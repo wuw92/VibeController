@@ -70,6 +70,8 @@ Windows 可能为该遥控器显示“驱动程序错误”。已确认这是 Wi
 
 连续轴采用固定的移动、滚动和不执行选项，具体规则见 [MappingEngine](src/VibeController.Core/Mapping/MappingEngine.cs)。状态页区分可执行、等待目标应用、测试和暂停，最近记录来自实际输入及派发结果。重置可以作用于当前按键或所选 Agent 的全部映射，并提供一次撤销；重复绑定作为说明，不视为禁止使用的冲突。
 
+状态页用于确认设备与执行状态，映射页只编辑操作和键位，设置页集中管理设备与偏好。映射编辑器随内容展开，长按键列表独立滚动；设置中的说明和高级诊断按需展开，收到新诊断数据不会自动打开面板。
+
 常用操作与键位读取见 [CodexShortcutResolver](src/VibeController.Infrastructure/Windows/CodexShortcutResolver.cs)、[DeepSeekShortcutResolver](src/VibeController.Infrastructure/Windows/DeepSeekShortcutResolver.cs)；DSH 命令目录以 [DeepSeekShortcutCatalog](src/VibeController.Infrastructure/Windows/DeepSeekShortcutCatalog.cs) 为准。手柄默认映射见 [DefaultProfileFactory](src/VibeController.Core/Mapping/DefaultProfileFactory.cs)，前台识别见 [窗口服务](src/VibeController.Infrastructure/Windows/CodexWindowService.cs)。既有映射保留。
 
 ### Codex 快捷键自动同步

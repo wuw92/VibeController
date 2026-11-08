@@ -25,7 +25,6 @@ export function Dashboard({ state, onToggleMapping, onToggleTestMode, onOpenMapp
     <main className="dashboard">
       <div className="dashboard-heading">
         <div>
-          <p className="eyebrow">Controller workspace</p>
           <h1>设备状态</h1>
           <p className="subtitle">
             {state.configuration?.codexOnly === false ? "全局模式 · 使用 Codex 映射" : `前台自动切换 · ${state.configuration?.foregroundAgent === "deepSeekHarness" ? "DeepSeek Harness" : state.configuration?.foregroundAgent === "codex" ? "Codex" : "等待目标应用"}`}
@@ -78,7 +77,7 @@ export function Dashboard({ state, onToggleMapping, onToggleTestMode, onOpenMapp
           </section>
 
           <section className="side-card">
-            <div className="side-card-label"><span>最近动作</span><span>即时</span></div>
+            <div className="side-card-label"><span>最近输入</span></div>
             <RecentAction action={state.lastAction} recent={state.recentAction} configuration={state.configuration} />
           </section>
 

@@ -19,15 +19,15 @@ export function ShortcutRecorder({ value, onChange }: ShortcutRecorderProps) {
 
   return (
     <label className="field-stack">
-      <span>自定义快捷键</span>
+      <span>快捷键</span>
       <input
         aria-label="自定义快捷键"
         value={value}
-        placeholder="例如 Ctrl+Alt+K"
+        placeholder="点击这里，然后按下组合键"
         readOnly
         onKeyDown={record}
       />
-      <small>按下完整组合键后自动生效。</small>
+      <small>点击输入框后按下组合键，修改即生效。</small>
     </label>
   );
 }

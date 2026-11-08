@@ -57,6 +57,19 @@ const verifiedRc901aInput: Rc901aInputStatus = {
 };
 
 describe("Settings", () => {
+  it("does not automatically expand raw diagnostics when new samples arrive", () => {
+    const values = { ...hostSettings, controllerType: "tclRc901a" as const };
+    const status = { connectionState: "connected" as const, deviceName: "RC901A", deviceId: "test",
+      batteryPercent: null, subscribedCharacteristicCount: 1, message: null, samples: [] };
+    const { rerender } = render(<Settings initialValues={values} rc901a={status} onSave={() => {}} onCopyDiagnostics={() => {}} />);
+    const details = screen.getByText(/原始输入数据/).closest("details")!;
+    expect(details).not.toHaveAttribute("open");
+    rerender(<Settings initialValues={values} rc901a={{ ...status, samples: [
+      { timestamp: "2026-11-08T00:00:00Z", serviceUuid: "service", characteristicUuid: "characteristic", dataHex: "01", length: 1 },
+    ] }} onSave={() => {}} onCopyDiagnostics={() => {}} />);
+    expect(details).not.toHaveAttribute("open");
+  });
+
   it("preserves slider edits after saving a controller selection through delayed acknowledgement", () => {
     const onSave = vi.fn();
     const onCopyDiagnostics = vi.fn();
@@ -117,12 +130,11 @@ describe("Settings", () => {
     expect(screen.getByLabelText("鼠标速度")).toHaveValue("81");
   });
 
-  it("explains that Codex shortcuts are read automatically instead of exposing a duplicate setting", () => {
+  it("keeps device choice first without duplicating the mapping explanation", () => {
     render(<Settings onSave={vi.fn()} onCopyDiagnostics={vi.fn()} />);
-
-    expect(screen.getByText("应用快捷键自动同步")).toBeInTheDocument();
-    expect(screen.getByText(/Codex 与 DeepSeek Harness 的快捷键在启动时读取/)).toBeInTheDocument();
-    expect(screen.queryByLabelText("听写快捷键")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { level: 2 })[0]).toHaveTextContent("输入设备");
+    expect(screen.queryByText("应用快捷键自动同步")).not.toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "仅在目标应用前台时执行" })).toBeInTheDocument();
   });
 
   it("switches the active device family to PS5 DualSense", () => {
@@ -314,6 +326,7 @@ describe("Settings", () => {
   it("copies diagnostics", () => {
     const onCopyDiagnostics = vi.fn();
     render(<Settings onSave={vi.fn()} onCopyDiagnostics={onCopyDiagnostics} />);
+    fireEvent.click(screen.getByText("高级诊断"));
     fireEvent.click(screen.getByRole("button", { name: "复制诊断信息" }));
     expect(onCopyDiagnostics).toHaveBeenCalledOnce();
   });
@@ -384,7 +397,7 @@ describe("Settings", () => {
       />,
     );
 
-    expect(screen.getByText("Hook 已安装 · 等待操作")).toBeInTheDocument();
+    expect(screen.getByText("已配置 · 等待操作")).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText("使用 DualSense 灯条显示 Codex 状态"));
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
       codexLightbarEnabled: false,

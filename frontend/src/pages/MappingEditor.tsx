@@ -75,7 +75,7 @@ export function MappingEditor({ agent = "codex", shortcutOptions, onAgentChange,
   return (
     <main className="workspace-page mapping-page">
       <header className="page-heading">
-        <div><p className="eyebrow">Input map</p><h1>按键映射</h1><p>选择按键并修改绑定，修改后即生效。</p></div>
+        <div><h1>按键映射</h1><p>选择按键并修改绑定，修改后即生效。</p></div>
         <div className="page-actions">
           {onUndoReset && <button className="quiet-button" type="button" onClick={onUndoReset}>撤销重置</button>}
           <button className="quiet-button" type="button" disabled={!initialValues || saveStatus?.state === "applying"} onClick={onReset}><RotateCcw size={15}/>重置 {agentName} 全部映射</button>
@@ -107,15 +107,14 @@ export function MappingEditor({ agent = "codex", shortcutOptions, onAgentChange,
         </section>
 
         <section className="inspector-card">
-          <div className="inspector-title"><span className="large-keycap">{selectedControl?.keycap ?? selectedLabel.split(" ")[0]}</span><div><p>正在编辑</p><h2>{selectedLabel}</h2></div>{onResetControl && <button className="quiet-button reset-control" type="button" onClick={() => onResetControl(selected)}>重置此按键</button>}</div>
+          <div className="inspector-title"><h2>{selectedLabel}</h2>{onResetControl && <button className="quiet-button reset-control" type="button" onClick={() => onResetControl(selected)}>重置此按键</button>}</div>
           <ActionPicker control={selected} agent={agent} shortcutOptions={shortcutOptions} value={values[selected] ?? "none"} onChange={changeAction} />
           {hasAppShortcut && <section className="shortcut-detail" aria-label="当前生效快捷键">
-            <div className="shortcut-detail-heading"><span>当前快捷键</span>{display.source && <span className="shortcut-source">{sourceLabels[display.source]}</span>}</div>
+            <div className="shortcut-detail-heading"><span>快捷键</span>{display.source && <span className="shortcut-source">{sourceLabels[display.source]}</span>}</div>
             <kbd>{display.shortcut ?? (display.message ? "未绑定或不可用" : "正在读取…")}</kbd>
-            <p>{display.message ?? (values[selected] === "cancel" ? "键盘固定操作。" : `由 ${agentName} 管理，设置变化后自动同步。`)}</p>
+            {display.message && <p>{display.message}</p>}
           </section>}
           {values[selected] === "keyboardShortcut" && <ShortcutRecorder value={shortcuts[selected] ?? ""} onChange={(shortcut) => { setShortcuts((current) => ({ ...current, [selected]: shortcut })); onSave({ ...mappings, [selected]: `shortcut:${shortcut}` }); }} />}
-          <div className="mapping-preview"><span>触发结果</span><strong>{display.label}</strong></div>
           {incompleteShortcut && <p className="inline-warning"><AlertTriangle size={16}/>录入完整快捷键后自动生效。</p>}
           {conflict && <p className="duplicate-binding">重复绑定：{conflict} 也会触发该操作。</p>}
         </section>

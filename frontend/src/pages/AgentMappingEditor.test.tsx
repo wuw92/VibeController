@@ -61,6 +61,6 @@ it("shows current DSH keys outside the menu and synchronizes without discarding 
   } }} onSave={onSave} onReset={vi.fn()} />);
   expect(editor.getByLabelText("绑定操作")).toHaveValue("deepseek:session.search");
   expect(within(editor.getByRole("region", { name: "当前生效快捷键" })).getByText("Ctrl+J")).toBeInTheDocument();
-  expect(editor.getByText("由 DeepSeek Harness 管理，设置变化后自动同步。")).toBeInTheDocument();
+  expect(editor.queryByText(/由 Codex 管理/)).not.toBeInTheDocument();
   expect(onSave).toHaveBeenLastCalledWith("deepSeekHarness", { x: "deepseek:session.search" });
 });

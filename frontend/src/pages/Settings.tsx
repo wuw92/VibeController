@@ -113,11 +113,11 @@ export function Settings({
   );
   const activityState = codexActivity?.state ?? "idle";
   const hookLabel = codexHook?.errorMessage
-    ? "Hook 配置异常"
+    ? "状态同步异常"
     : codexHook?.installed
-      ? `Hook 已安装 · ${activityLabels[activityState]}`
+      ? `已配置 · ${activityLabels[activityState]}`
       : values.codexLightbarEnabled
-        ? "正在配置 Hook"
+        ? "正在配置状态同步"
         : "未启用";
   const rc901aConnectionLabels = {
     idle: "等待连接",
@@ -142,7 +142,6 @@ export function Settings({
     <main className="workspace-page settings-page">
       <header className="page-heading">
         <div>
-          <p className="eyebrow">Preferences</p>
           <h1>设置</h1>
           <p>{initialValues ? "调整设备、输入手感和启动行为，修改后即生效。" : "等待应用配置…"}</p>
         </div>
@@ -150,25 +149,6 @@ export function Settings({
       </header>
 
       <fieldset className="settings-grid" disabled={!initialValues}>
-        <section className="settings-card">
-          <h2>安全与启动</h2>
-          <label className="switch-row">
-            <span><strong>仅在目标应用前台时执行</strong><small>识别 Codex / DeepSeek Harness 并切换映射；关闭后全局使用 Codex 映射。</small></span>
-            <input aria-label="仅在目标应用前台时执行" type="checkbox" checked={values.codexOnly} onChange={(event) => update("codexOnly", event.target.checked)} />
-          </label>
-          <label className="switch-row">
-            <span><strong>登录 Windows 后自动启动</strong><small>后台等待手柄连接，可随时从托盘打开。</small></span>
-            <input aria-label="登录 Windows 后自动启动" type="checkbox" checked={values.startWithWindows} onChange={(event) => update("startWithWindows", event.target.checked)} />
-          </label>
-        </section>
-
-        <section className="settings-card">
-          <h2>输入手感</h2>
-          <SliderField label="摇杆死区" value={Math.round(values.deadZone * 100)} min={5} max={35} onChange={(value) => update("deadZone", value / 100)} />
-          <SliderField label="鼠标速度" value={values.mouseSpeed} min={10} max={100} onChange={(value) => update("mouseSpeed", value)} />
-          <SliderField label="滚动速度" value={values.scrollSpeed} min={10} max={100} onChange={(value) => update("scrollSpeed", value)} />
-        </section>
-
         <section className="settings-card device-settings-card">
           <h2>输入设备</h2>
           <fieldset className="device-family-picker">
@@ -202,10 +182,6 @@ export function Settings({
               </select>
             </label>
           )}
-          <div className="shortcut-sync-card" role="note">
-            <span className="shortcut-sync-icon" aria-hidden="true"><RefreshCw size={17} /></span>
-            <span><strong>应用快捷键自动同步</strong><small>Codex 与 DeepSeek Harness 的快捷键在启动时读取，设置变化后自动同步。在按键映射中查看当前键位。</small></span>
-          </div>
           {values.controllerType === "tclRc901a" && (
             <>
               <section className="rc901a-direct-panel" aria-label="RC901A Windows HID 状态">
@@ -224,7 +200,7 @@ export function Settings({
                   <span><Battery size={14} />{rc901a?.batteryPercent == null ? "电量未知" : `${rc901a.batteryPercent}% 电量`}</span>
                   <span><Radio size={14} />{rc901a?.subscribedCharacteristicCount ?? 0} 个数据通道</span>
                 </div>
-                <p className="rc901a-message">{rc901a?.message ?? "保存设置后，VibeController 会查找已配对的遥控器。"}</p>
+                <p className="rc901a-message">{rc901a?.message ?? "VibeController 会查找已配对的遥控器。"}</p>
                 <p className="rc901a-guidance">{rc901aPairingInstruction} 专用驱动连接后，22 个已验证按键会自动就绪，无需逐键学习。麦克风键可在映射后触发 Codex 听写；遥控器自身音频暂未启用。</p>
 
                 <div className="rc901a-actions">
@@ -232,7 +208,7 @@ export function Settings({
                   <button className="quiet-button" type="button" onClick={onClearRc901aSamples} disabled={!onClearRc901aSamples || rc901aSamples.length === 0}><Trash2 size={14} />清除记录</button>
                 </div>
 
-                <details className="rc901a-packet-log" open={rc901aSamples.length > 0}>
+                <details className="rc901a-packet-log" >
                   <summary>原始输入数据 <span>{rc901aSamples.length}</span></summary>
                   {rc901aSamples.length === 0 ? (
                     <p>连接后按下遥控器按键，这里会显示只读数据。</p>
@@ -262,9 +238,28 @@ export function Settings({
           )}
         </section>
 
+        <section className="settings-card">
+          <h2>使用方式</h2>
+          <label className="switch-row">
+            <span><strong>仅在目标应用前台时执行</strong><small>识别 Codex / DeepSeek Harness 并切换映射；关闭后全局使用 Codex 映射。</small></span>
+            <input aria-label="仅在目标应用前台时执行" role="switch" aria-checked={values.codexOnly} type="checkbox" checked={values.codexOnly} onChange={(event) => update("codexOnly", event.target.checked)} />
+          </label>
+          <label className="switch-row">
+            <span><strong>登录 Windows 后自动启动</strong><small>后台等待手柄连接，可随时从托盘打开。</small></span>
+            <input aria-label="登录 Windows 后自动启动" role="switch" aria-checked={values.startWithWindows} type="checkbox" checked={values.startWithWindows} onChange={(event) => update("startWithWindows", event.target.checked)} />
+          </label>
+        </section>
+
+        <section className="settings-card">
+          <h2>输入手感</h2>
+          <SliderField label="摇杆死区" value={Math.round(values.deadZone * 100)} min={5} max={35} onChange={(value) => update("deadZone", value / 100)} />
+          <SliderField label="鼠标速度" value={values.mouseSpeed} min={10} max={100} onChange={(value) => update("mouseSpeed", value)} />
+          <SliderField label="滚动速度" value={values.scrollSpeed} min={10} max={100} onChange={(value) => update("scrollSpeed", value)} />
+        </section>
+
         <section className="settings-card integration-card">
           <div className="integration-heading">
-            <div><p className="eyebrow">System signals</p><h2>听写与状态灯</h2></div>
+            <div><h2>麦克风与灯条</h2></div>
             <button className="quiet-button" type="button" onClick={onRefreshIntegrations} disabled={!onRefreshIntegrations}>
               <RefreshCw size={14} />刷新检测
             </button>
@@ -274,20 +269,20 @@ export function Settings({
             <article className="integration-status-item" data-tone={microphone?.state === "error" ? "danger" : "info"}>
               <span className="integration-icon" aria-hidden="true"><Mic2 size={18} /></span>
               <div>
-                <span className="integration-kicker">Windows 默认听写麦克风</span>
+                <span className="integration-kicker">当前麦克风</span>
                 <strong>{microphoneName}</strong>
-                <small>{microphone?.message ?? "VibeController 只读取设备名称，不录音；Codex 继续负责听写。"}</small>
+                {microphone?.state === "error" ? <small>{microphone.message}</small> : <details className="microphone-guide"><summary>使用说明</summary><small>{microphone?.message ?? "VibeController 只读取设备名称，不录音；Codex 继续负责听写。"}</small></details>}
               </div>
             </article>
 
             <article className="integration-status-item" data-tone={microphone?.dualSenseMicrophoneAvailable ? "success" : "neutral"}>
               <span className="integration-icon" aria-hidden="true"><Gamepad2 size={18} /></span>
               <div>
-                <span className="integration-kicker">DualSense 麦克风</span>
+                <span className="integration-kicker">手柄麦克风</span>
                 <strong>{microphone?.dualSenseMicrophoneAvailable ? "已发现录音端点" : "当前不可用"}</strong>
-                <small>{microphone?.dualSenseMicrophoneAvailable
+                <details className="microphone-guide"><summary>连接说明</summary><small>{microphone?.dualSenseMicrophoneAvailable
                   ? "Codex 可在 Windows 选择该输入后使用原生听写。"
-                  : "普通蓝牙连接未暴露 DualSense 麦克风；Codex 将使用上方的 Windows 默认输入。"}</small>
+                  : "普通蓝牙连接未暴露 DualSense 麦克风；Codex 将使用上方的 Windows 默认输入。"}</small></details>
               </div>
             </article>
           </div>
@@ -296,29 +291,29 @@ export function Settings({
             <label className="switch-row lightbar-switch">
               <span>
                 <strong>使用 DualSense 灯条显示 Codex 状态</strong>
-                <small>开启后，会备份并合并用户级 Codex Hook；首次使用需在 Codex 中信任。</small>
+                <small>跟随 Codex 的工作状态；首次使用需在 Codex 中确认信任。</small>
               </span>
-              <input aria-label="使用 DualSense 灯条显示 Codex 状态" type="checkbox" checked={values.codexLightbarEnabled} onChange={(event) => update("codexLightbarEnabled", event.target.checked)} />
+              <input aria-label="使用 DualSense 灯条显示 Codex 状态" role="switch" aria-checked={values.codexLightbarEnabled} type="checkbox" checked={values.codexLightbarEnabled} onChange={(event) => update("codexLightbarEnabled", event.target.checked)} />
             </label>
             <div className="lightbar-meta">
               <span className="hook-state" data-state={codexHook?.errorMessage ? "error" : codexHook?.installed ? "installed" : "off"}>
                 <Lightbulb size={14} />{hookLabel}
               </span>
-              <div className="lightbar-legend" aria-label="灯条颜色含义">
+              {values.codexLightbarEnabled && <div className="lightbar-legend" aria-label="灯条颜色含义">
                 <span><i data-color="working" />工作中</span>
                 <span><i data-color="attention" />等待操作</span>
                 <span><i data-color="completed" />已完成</span>
-              </div>
+              </div>}
             </div>
             {codexHook?.errorMessage && <p className="integration-error">{codexHook.errorMessage}</p>}
           </div>
         </section>
 
-        <section className="settings-card diagnostics-card">
-          <h2>诊断</h2>
+        <details className="settings-card diagnostics-card">
+          <summary>高级诊断</summary>
           <p>复制当前版本、设备状态和运行配置，便于排查连接问题。</p>
           <button className="quiet-button" type="button" onClick={onCopyDiagnostics}><Clipboard size={15} />复制诊断信息</button>
-        </section>
+        </details>
       </fieldset>
 
     </main>

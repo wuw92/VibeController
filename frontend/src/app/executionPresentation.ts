@@ -6,6 +6,6 @@ export function executionPresentation(state: RuntimeStatePayload) {
   if (!state.mappingEnabled) return { label: "映射已暂停", tone: "warning" as const };
   if (!state.configuration) return { label: "等待配置", tone: "warning" as const };
   if (state.configuration.codexOnly && !state.configuration.foregroundAgent)
-    return { label: "等待目标应用", tone: "warning" as const };
+    return { label: "等待目标应用", tone: "info" as const };
   return { label: "映射可执行", tone: "success" as const };
 }

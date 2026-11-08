@@ -169,8 +169,8 @@ export function Settings({
         <section className="settings-card">
           <h2>安全与启动</h2>
           <label className="switch-row">
-            <span><strong>仅在 Codex 前台时执行</strong><small>避免手柄操作误输入到其他应用。</small></span>
-            <input aria-label="仅在 Codex 前台时执行" type="checkbox" checked={values.codexOnly} onChange={(event) => update("codexOnly", event.target.checked)} />
+            <span><strong>仅在目标应用前台时执行</strong><small>识别 Codex / DeepSeek Harness 并切换映射；关闭后全局使用 Codex 映射。</small></span>
+            <input aria-label="仅在目标应用前台时执行" type="checkbox" checked={values.codexOnly} onChange={(event) => update("codexOnly", event.target.checked)} />
           </label>
           <label className="switch-row">
             <span><strong>登录 Windows 后自动启动</strong><small>后台等待手柄连接，可随时从托盘打开。</small></span>
@@ -186,7 +186,7 @@ export function Settings({
         </section>
 
         <section className="settings-card device-settings-card">
-          <h2>设备与 Codex</h2>
+          <h2>输入设备</h2>
           <fieldset className="device-family-picker">
             <legend>设备类型</legend>
             <div className="device-family-options">
@@ -218,9 +218,9 @@ export function Settings({
               </select>
             </label>
           )}
-          <div className="codex-sync-card" role="note">
-            <span className="codex-sync-icon" aria-hidden="true"><RefreshCw size={17} /></span>
-            <span><strong>自动同步 Codex 快捷键</strong><small>首次触发 Codex 操作时读取当前用户的设置；之后修改会自动刷新，无需重新映射。</small></span>
+          <div className="shortcut-sync-card" role="note">
+            <span className="shortcut-sync-icon" aria-hidden="true"><RefreshCw size={17} /></span>
+            <span><strong>应用快捷键自动同步</strong><small>Codex 与 DeepSeek Harness 的快捷键在启动时读取，设置变化后自动同步。在按键映射中查看当前键位。</small></span>
           </div>
           {values.controllerType === "tclRc901a" && (
             <>

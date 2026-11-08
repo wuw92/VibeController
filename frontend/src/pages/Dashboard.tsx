@@ -4,9 +4,7 @@ import { getControllerPresentation } from "../app/controllerPresentation";
 import { ControllerVisual } from "../components/ControllerVisual";
 import { RecentAction } from "../components/RecentAction";
 import { StatusPill } from "../components/StatusPill";
-import { actionOptions } from "../components/ActionPicker";
-
-const actionLabels = new Map<string, string>(actionOptions);
+import { getMappingDisplay } from "../app/mappingActions";
 
 interface DashboardProps {
   state: RuntimeStatePayload;
@@ -84,17 +82,17 @@ export function Dashboard({ state, onToggleMapping, onToggleTestMode }: Dashboar
           </section>
 
           <section className="side-card">
-            <div className="side-card-label"><span>当前快捷操作</span><span>Codex</span></div>
+            <div className="side-card-label"><span>当前快捷操作</span><span>{state.configuration?.activeAgent === "deepSeekHarness" ? "DeepSeek Harness" : "Codex"}</span></div>
             <div className="control-list">
               {!state.configuration && <p>等待主机配置</p>}
               {presentation.controls.map(({ key, keycap }) => {
                 const action = state.configuration?.mappings[key];
                 if (!action || action === "none") return null;
-                const label = action.startsWith("shortcut:")
-                  ? action.slice(9)
-                  : actionLabels.get(action) ?? action;
+                const mapping = getMappingDisplay(action,
+                  state.configuration?.agentShortcuts?.[state.configuration.activeAgent ?? "codex"]);
                 return <div className="control-row" key={key}>
-                  <span>{label}</span><span className="keycap">{keycap}</span>
+                  <span className="control-row-description"><span>{mapping.label}</span>{mapping.shortcut && <small>{mapping.shortcut}</small>}</span>
+                  <span className="keycap">{keycap}</span>
                 </div>;
               })}
             </div>

@@ -33,7 +33,17 @@ public sealed record RuntimeConfigurationPayload(
     CodexHookRegistrationStatus? CodexHook = null,
     CodexActivityStatus? CodexActivity = null,
     Rc901aStatus? Rc901a = null,
-    Rc901aInputStatus? Rc901aInput = null);
+    Rc901aInputStatus? Rc901aInput = null,
+    IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>>? AgentMappings = null,
+    AgentTarget ActiveAgent = AgentTarget.Codex,
+    IReadOnlyDictionary<string, IReadOnlyList<AgentShortcutOption>>? AgentShortcuts = null);
+
+public sealed record AgentShortcutOption(
+    string Value,
+    string Label,
+    string? Shortcut,
+    string Source,
+    string? Message = null);
 
 public sealed record Rc901aInputStatus(
     IReadOnlyList<Rc901aInputBinding> Bindings,

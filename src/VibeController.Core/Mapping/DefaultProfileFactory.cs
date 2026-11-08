@@ -77,4 +77,24 @@ public static class DefaultProfileFactory
 
     private static MappedAction Shortcut(string key) =>
         new(MappedActionKind.KeyboardShortcut, new KeyboardShortcut(key));
+
+    public static MappingProfile CreateDeepSeekHarness()
+    {
+        var mappings = Create().Mappings.ToDictionary(pair => pair.Key, pair => pair.Value);
+        foreach (var (control, action) in mappings.ToArray())
+        {
+            mappings[control] = action.Kind switch
+            {
+                MappedActionKind.ActivateCodex => new(MappedActionKind.ActivateDeepSeekHarness),
+                MappedActionKind.Send => new(MappedActionKind.DeepSeekCommand, CommandId: "fixed.send"),
+                MappedActionKind.CommandPalette => new(MappedActionKind.DeepSeekCommand, CommandId: "shortcuts.open"),
+                MappedActionKind.CodexDictation or
+                MappedActionKind.PreviousChat or MappedActionKind.NextChat or
+                MappedActionKind.IncreaseReasoning or MappedActionKind.DecreaseReasoning =>
+                    new(MappedActionKind.None),
+                _ => action,
+            };
+        }
+        return new MappingProfile("DeepSeek Harness 默认配置", mappings);
+    }
 }

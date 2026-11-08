@@ -18,7 +18,7 @@ export function AppShell({ children, page, onNavigate }: AppShellProps) {
             <span className="brand-mark" aria-hidden="true"><Gamepad2 size={18} /></span>
             <span className="brand-copy">
               <strong>VibeController</strong>
-              <span>Controllers for Codex</span>
+              <span>Controllers for AI agents</span>
             </span>
           </div>
           <nav className="main-nav" aria-label="主导航">

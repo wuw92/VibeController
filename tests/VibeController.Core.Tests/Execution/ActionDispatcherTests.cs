@@ -6,6 +6,27 @@ namespace VibeController.Core.Tests.Execution;
 
 public sealed class ActionDispatcherTests
 {
+    [Theory]
+    [InlineData(AgentTarget.DeepSeekHarness, true, ActionDispatchStatus.Dispatched)]
+    [InlineData(AgentTarget.Codex, true, ActionDispatchStatus.Blocked)]
+    [InlineData(null, true, ActionDispatchStatus.Blocked)]
+    [InlineData(AgentTarget.Codex, false, ActionDispatchStatus.Dispatched)]
+    public async Task Dispatch_GuardsSelectedAgent(AgentTarget? foreground, bool targetOnly, ActionDispatchStatus expected)
+    {
+        var executor = new FakeActionExecutor();
+        var dispatcher = new ActionDispatcher(new AgentForeground(foreground), executor);
+        var result = await dispatcher.DispatchAsync(Invocation(MappedActionKind.KeyboardShortcut),
+            Options with { CodexOnly = targetOnly, TargetAgent = AgentTarget.DeepSeekHarness });
+        Assert.Equal(expected, result.Status);
+        Assert.Equal(expected == ActionDispatchStatus.Dispatched ? 1 : 0, executor.Invocations.Count);
+    }
+
+    private sealed class AgentForeground(AgentTarget? agent) : IForegroundAppService
+    {
+        public bool IsCodexForeground() => agent == AgentTarget.Codex;
+        public AgentTarget? GetForegroundAgent() => agent;
+    }
+
     private static readonly ActionExecutionOptions Options = new(
         CodexOnly: true,
         DictationShortcut: new KeyboardShortcut("D", [KeyModifier.Control, KeyModifier.Shift]),

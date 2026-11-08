@@ -5,6 +5,16 @@ namespace VibeController.Core.Tests.Mapping;
 
 public sealed class DefaultProfileFactoryTests
 {
+    [Fact]
+    public void DeepSeekDefaults_UseApplicationActionsForSendingAndOpeningItsMenu()
+    {
+        var profile = DefaultProfileFactory.CreateDeepSeekHarness();
+        Assert.Equal("fixed.send", profile.Mappings[ControllerControl.A].CommandId);
+        Assert.Equal("shortcuts.open", profile.Mappings[ControllerControl.Y].CommandId);
+        Assert.Equal(MappedActionKind.DeepSeekCommand, profile.Mappings[ControllerControl.A].Kind);
+        Assert.Equal(MappedActionKind.ActivateDeepSeekHarness, profile.Mappings[ControllerControl.Menu].Kind);
+    }
+
     [Theory]
     [InlineData("MouseScrollUp")]
     [InlineData("MouseScrollDown")]

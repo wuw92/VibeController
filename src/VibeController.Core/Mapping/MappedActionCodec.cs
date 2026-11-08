@@ -6,6 +6,12 @@ public static class MappedActionCodec
 {
     public static bool TryParse(string? name, out MappedAction action)
     {
+        if (name?.StartsWith("deepseek:", StringComparison.Ordinal) == true)
+        {
+            var commandId = name[9..];
+            action = new MappedAction(MappedActionKind.DeepSeekCommand, CommandId: commandId);
+            return !string.IsNullOrWhiteSpace(commandId);
+        }
         if (name?.StartsWith("shortcut:", StringComparison.Ordinal) == true)
         {
             var shortcut = ParseShortcut(name[9..]);
@@ -28,6 +34,7 @@ public static class MappedActionCodec
             "increaseReasoning" => MappedActionKind.IncreaseReasoning,
             "decreaseReasoning" => MappedActionKind.DecreaseReasoning,
             "activateCodex" => MappedActionKind.ActivateCodex,
+            "activateDeepSeekHarness" => MappedActionKind.ActivateDeepSeekHarness,
             "mouseMove" => MappedActionKind.MouseMove,
             "mouseLeftClick" => MappedActionKind.MouseLeftClick,
             "mouseRightClick" => MappedActionKind.MouseRightClick,
@@ -42,6 +49,7 @@ public static class MappedActionCodec
 
     public static string Format(MappedAction action) => action.Kind switch
     {
+        MappedActionKind.DeepSeekCommand => $"deepseek:{action.CommandId}",
         MappedActionKind.CodexDictation => "dictation",
         MappedActionKind.Send => "send",
         MappedActionKind.Cancel => "cancel",
@@ -55,6 +63,7 @@ public static class MappedActionCodec
         MappedActionKind.IncreaseReasoning => "increaseReasoning",
         MappedActionKind.DecreaseReasoning => "decreaseReasoning",
         MappedActionKind.ActivateCodex => "activateCodex",
+        MappedActionKind.ActivateDeepSeekHarness => "activateDeepSeekHarness",
         MappedActionKind.KeyboardShortcut =>
             $"shortcut:{FormatShortcut(action.Shortcut ?? new KeyboardShortcut())}",
         MappedActionKind.MouseMove => "mouseMove",

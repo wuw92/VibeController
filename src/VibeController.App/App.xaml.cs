@@ -2,11 +2,13 @@ using System.IO;
 using System.Text;
 using System.Windows;
 using VibeController.Infrastructure.Codex;
+using VibeController.App.Services;
 
 namespace VibeController.App;
 
 public partial class App : System.Windows.Application
 {
+    private SingleInstanceGuard? _singleInstance;
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
@@ -17,9 +19,23 @@ public partial class App : System.Windows.Application
             return;
         }
 
+        _singleInstance = new SingleInstanceGuard();
+        if (!_singleInstance.IsFirstInstance)
+        {
+            SingleInstanceGuard.ActivateExistingWindow();
+            Shutdown(0);
+            return;
+        }
+
         var window = new MainWindow();
         MainWindow = window;
         window.Show();
+    }
+
+    protected override void OnExit(ExitEventArgs e)
+    {
+        _singleInstance?.Dispose();
+        base.OnExit(e);
     }
 
     private static void RecordCodexHookEvent()

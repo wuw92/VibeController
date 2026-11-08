@@ -133,12 +133,24 @@ public partial class MainWindow : Window
 
     private async void ExitApplication()
     {
+        if (_exitRequested) return;
         _exitRequested = true;
-        _tray?.Dispose();
-        _runtime.StateJsonReady -= OnStateJsonReady;
-        await _runtime.DisposeAsync();
-        _windowSource?.RemoveHook(OnWindowMessage);
-        _rc901aRawInput.Dispose();
-        System.Windows.Application.Current.Shutdown();
+        try
+        {
+            _tray?.Dispose();
+            _runtime.StateJsonReady -= OnStateJsonReady;
+            await _runtime.DisposeAsync();
+            _windowSource?.RemoveHook(OnWindowMessage);
+            await _rc901aRawInput.DisposeAsync();
+            Browser.Dispose();
+        }
+        catch (Exception exception)
+        {
+            System.Diagnostics.Debug.WriteLine(exception);
+        }
+        finally
+        {
+            System.Windows.Application.Current.Shutdown();
+        }
     }
 }

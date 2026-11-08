@@ -33,15 +33,16 @@ public sealed class ActionDispatcher
         var bypassesForegroundGuard =
             invocation.Action.Kind is
                 MappedActionKind.ActivateCodex or
+                MappedActionKind.ActivateDeepSeekHarness or
                 MappedActionKind.CodexDictation;
 
         if (options.CodexOnly &&
             !bypassesForegroundGuard &&
-            !_foregroundAppService.IsCodexForeground())
+            _foregroundAppService.GetForegroundAgent() != options.TargetAgent)
         {
             return new ActionDispatchResult(
                 ActionDispatchStatus.Blocked,
-                "Codex 未处于前台，动作未发送");
+                "目标应用未处于前台，动作未发送");
         }
 
         try

@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text;
+using VibeController.Core.Domain;
 using VibeController.Core.Execution;
 
 namespace VibeController.Infrastructure.Windows;
@@ -31,32 +33,36 @@ public sealed class CodexWindowService : ICodexWindowService
 {
     private const int ShowRestore = 9;
 
-    public bool IsCodexForeground()
+    public bool IsCodexForeground() => GetForegroundAgent() == AgentTarget.Codex;
+
+    public AgentTarget? GetForegroundAgent()
     {
         var window = GetForegroundWindow();
         if (window == IntPtr.Zero)
         {
-            return false;
+            return null;
         }
 
         GetWindowThreadProcessId(window, out var processId);
         if (processId == 0)
         {
-            return false;
+            return null;
         }
 
         try
         {
             using var process = Process.GetProcessById((int)processId);
-            return Matches(process);
+            var title = new StringBuilder(512);
+            GetWindowText(window, title, title.Capacity);
+            return AgentWindowMatcher.Match(process.ProcessName, GetExecutablePath(process), title.ToString());
         }
         catch (ArgumentException)
         {
-            return false;
+            return null;
         }
         catch (InvalidOperationException)
         {
-            return false;
+            return null;
         }
     }
 
@@ -79,7 +85,25 @@ public sealed class CodexWindowService : ICodexWindowService
         return false;
     }
 
+    public bool TryActivateDeepSeekHarness()
+    {
+        foreach (var process in Process.GetProcessesByName("DeepSeek Harness"))
+        {
+            using (process)
+            {
+                if (process.MainWindowHandle == IntPtr.Zero) continue;
+                ShowWindow(process.MainWindowHandle, ShowRestore);
+                return SetForegroundWindow(process.MainWindowHandle);
+            }
+        }
+        return false;
+    }
+
     private static bool Matches(Process process)
+        => CodexWindowMatcher.IsCodexWindow(
+            process.ProcessName, GetExecutablePath(process), process.MainWindowTitle);
+
+    private static string? GetExecutablePath(Process process)
     {
         string? executablePath = null;
         try
@@ -93,14 +117,14 @@ public sealed class CodexWindowService : ICodexWindowService
         {
         }
 
-        return CodexWindowMatcher.IsCodexWindow(
-            process.ProcessName,
-            executablePath,
-            process.MainWindowTitle);
+        return executablePath;
     }
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetWindowText(IntPtr window, StringBuilder text, int count);
 
     [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
@@ -112,4 +136,17 @@ public sealed class CodexWindowService : ICodexWindowService
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool ShowWindow(IntPtr window, int command);
+}
+
+public static class AgentWindowMatcher
+{
+    public static AgentTarget? Match(string processName, string? executablePath, string windowTitle)
+    {
+        if (processName.Equals("DeepSeek Harness", StringComparison.OrdinalIgnoreCase))
+        {
+            return AgentTarget.DeepSeekHarness;
+        }
+        return CodexWindowMatcher.IsCodexWindow(processName, executablePath, windowTitle)
+            ? AgentTarget.Codex : null;
+    }
 }

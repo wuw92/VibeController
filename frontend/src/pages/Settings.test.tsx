@@ -94,7 +94,7 @@ describe("Settings", () => {
     const { rerender } = render(<Settings onSave={onSave} onCopyDiagnostics={onCopyDiagnostics} />);
     rerender(<Settings initialValues={persisted} onSave={onSave} onCopyDiagnostics={onCopyDiagnostics} />);
     expect(screen.getByLabelText("PS5 DualSense")).toBeChecked();
-    expect(screen.getByLabelText("仅在 Codex 前台时执行")).not.toBeChecked();
+    expect(screen.getByLabelText("仅在目标应用前台时执行")).not.toBeChecked();
     expect(screen.getByLabelText("鼠标速度")).toHaveValue("73");
 
     fireEvent.click(screen.getByLabelText("Xbox 无线手柄"));
@@ -115,8 +115,8 @@ describe("Settings", () => {
   it("explains that Codex shortcuts are read automatically instead of exposing a duplicate setting", () => {
     render(<Settings onSave={vi.fn()} onCopyDiagnostics={vi.fn()} />);
 
-    expect(screen.getByText("自动同步 Codex 快捷键")).toBeInTheDocument();
-    expect(screen.getByText(/首次触发 Codex 操作时读取当前用户的设置/)).toBeInTheDocument();
+    expect(screen.getByText("应用快捷键自动同步")).toBeInTheDocument();
+    expect(screen.getByText(/Codex 与 DeepSeek Harness 的快捷键在启动时读取/)).toBeInTheDocument();
     expect(screen.queryByLabelText("听写快捷键")).not.toBeInTheDocument();
   });
 
@@ -294,7 +294,7 @@ describe("Settings", () => {
     const onSave = vi.fn();
     render(<Settings onSave={onSave} onCopyDiagnostics={vi.fn()} />);
 
-    fireEvent.click(screen.getByLabelText("仅在 Codex 前台时执行"));
+    fireEvent.click(screen.getByLabelText("仅在目标应用前台时执行"));
     fireEvent.click(screen.getByLabelText("登录 Windows 后自动启动"));
     fireEvent.change(screen.getByLabelText("摇杆死区"), { target: { value: "22" } });
     fireEvent.change(screen.getByLabelText("活动控制器"), { target: { value: "2" } });

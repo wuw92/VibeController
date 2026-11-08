@@ -1,6 +1,8 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using VibeController.Core.Domain;
+using VibeController.Core.Mapping;
+using VibeController.Core.Runtime;
 using VibeController.Infrastructure.Codex;
 
 namespace VibeController.Infrastructure.Windows;
@@ -39,49 +41,79 @@ public sealed class CodexShortcutResolver : ICodexShortcutResolver
         lock (_sync)
         {
             ReloadIfChanged();
-            var customBindings = _bindings
-                .Where(binding => string.Equals(
-                    binding.Command,
-                    definition.CommandId,
-                    StringComparison.Ordinal))
-                .ToArray();
+            return Resolve(definition);
+        }
+    }
 
-            IReadOnlyList<string> candidates;
-            if (customBindings.Length > 0)
+    public IReadOnlyList<AgentShortcutOption> GetShortcuts()
+    {
+        lock (_sync)
+        {
+            ReloadIfChanged();
+            var result = new List<AgentShortcutOption>();
+            foreach (var kind in Enum.GetValues<MappedActionKind>())
             {
-                if (customBindings.Any(binding => binding.Key is null))
+                if (!CodexShortcutCatalog.TryGet(kind, out var definition)) continue;
+                var source = _bindings.Any(binding => binding.Command == definition.CommandId) ? "custom" : "default";
+                try
                 {
-                    throw Unbound(definition);
+                    var shortcut = Resolve(definition);
+                    result.Add(new(MappedActionCodec.Format(new(kind)), definition.DisplayName,
+                        MappedActionCodec.Format(new(MappedActionKind.KeyboardShortcut, shortcut))[9..], source));
                 }
-
-                candidates = customBindings
-                    .Select(binding => binding.Key!)
-                    .ToArray();
-            }
-            else
-            {
-                candidates = definition.WindowsDefaults;
-            }
-
-            foreach (var candidate in candidates)
-            {
-                if (KeyboardShortcutParser.TryParseCodexAccelerator(
-                    candidate,
-                    out var shortcut))
+                catch (InvalidOperationException exception)
                 {
-                    return shortcut;
+                    result.Add(new(MappedActionCodec.Format(new(kind)), definition.DisplayName, null, source, exception.Message));
                 }
             }
+            return result;
+        }
+    }
 
-            if (candidates.Count == 0)
+    private KeyboardShortcut Resolve(CodexShortcutDefinition definition)
+    {
+        var customBindings = _bindings
+            .Where(binding => string.Equals(
+                binding.Command,
+                definition.CommandId,
+                StringComparison.Ordinal))
+            .ToArray();
+
+        IReadOnlyList<string> candidates;
+        if (customBindings.Length > 0)
+        {
+            if (customBindings.Any(binding => binding.Key is null))
             {
                 throw Unbound(definition);
             }
 
-            throw new InvalidOperationException(
-                $"Codex 的「{definition.DisplayName}」快捷键暂不支持：{string.Join("、", candidates)}。" +
-                "请在 Codex 设置 > 键盘快捷键中改为常规组合键。");
+            candidates = customBindings
+                .Select(binding => binding.Key!)
+                .ToArray();
         }
+        else
+        {
+            candidates = definition.WindowsDefaults;
+        }
+
+        foreach (var candidate in candidates)
+        {
+            if (KeyboardShortcutParser.TryParseCodexAccelerator(
+                candidate,
+                out var shortcut))
+            {
+                return shortcut;
+            }
+        }
+
+        if (candidates.Count == 0)
+        {
+            throw Unbound(definition);
+        }
+
+        throw new InvalidOperationException(
+            $"Codex 的「{definition.DisplayName}」快捷键暂不支持：{string.Join("、", candidates)}。" +
+            "请在 Codex 设置 > 键盘快捷键中改为常规组合键。");
     }
 
     private void ReloadIfChanged()

@@ -26,6 +26,13 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
     private Rc901aUnknownInputSignal? _lastUnknownRc901aInput;
     private CancellationTokenSource? _rc901aLearningSaveCancellation;
     private MappingProfile? _formattedProfile;
+    private readonly IForegroundAppService _foregroundAppService;
+    private readonly IDeepSeekShortcutResolver _deepSeekShortcutResolver;
+    private readonly CodexShortcutResolver _codexShortcutResolver;
+    private IReadOnlyList<AgentShortcutOption>? _deepSeekShortcuts;
+    private IReadOnlyList<AgentShortcutOption>? _codexShortcuts;
+    private AgentTarget _activeAgent = AgentTarget.Codex;
+    private MappingProfile? _runtimeProfile;
     private IReadOnlyDictionary<string, string> _formattedMappings =
         new Dictionary<string, string>();
     private readonly CancellationTokenSource _cancellation = new();
@@ -67,9 +74,15 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
 
     public ControllerRuntimeService(
         ISettingsStore settingsStore,
-        IRc901aRawInputSource? rc901aRawInputSource = null)
+        IRc901aRawInputSource? rc901aRawInputSource = null,
+        IForegroundAppService? foregroundAppService = null,
+        IDeepSeekShortcutResolver? deepSeekShortcutResolver = null,
+        CodexShortcutResolver? codexShortcutResolver = null)
     {
         _settingsStore = settingsStore;
+        _foregroundAppService = foregroundAppService ?? new CodexWindowService();
+        _deepSeekShortcutResolver = deepSeekShortcutResolver ?? new DeepSeekShortcutResolver();
+        _codexShortcutResolver = codexShortcutResolver ?? new CodexShortcutResolver();
         _rc901aRawInputSource = rc901aRawInputSource;
         var localDataDirectory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -151,10 +164,7 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
                         await UpdateMappingAsync(payload);
                         break;
                     case "resetDefaults":
-                        _settings = _settings with { Profile = DefaultProfileFactory.Create() };
-                        _stateDirty = true;
-                        _runtime?.UpdateProfile(_settings.Profile);
-                        await _settingsStore.SaveAsync(_settings, _cancellation.Token);
+                        await ResetMappingsAsync(payload);
                         break;
                     case "requestState":
                         PublishCurrent();
@@ -232,6 +242,7 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
             {
                 if (_runtime is null) continue;
                 var timestamp = DateTimeOffset.UtcNow;
+                UpdateActiveProfile();
                 if (ExpireRc901aLearning(timestamp))
                 {
                     _rc901aAdapter?.ResetInputState();
@@ -246,7 +257,7 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
                 {
                     _rc901aAdapter?.ResetInputState();
                 }
-                var integrationChanged = PollCodexActivity(timestamp);
+                var integrationChanged = PollIntegrations(timestamp);
                 ApplyLightbarColor(timestamp);
                 PublishRuntimeState(result, timestamp, integrationChanged);
             }
@@ -312,7 +323,8 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
             _settings.CodexOnly,
             _settings.DictationShortcut,
             _settings.MouseSpeed,
-            _settings.ScrollSpeed),
+            _settings.ScrollSpeed,
+            _activeAgent),
         _settings.RepeatDelayMilliseconds,
         _settings.RepeatIntervalMilliseconds);
 
@@ -328,7 +340,8 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
         var executor = new WindowsActionExecutor(
             new WindowsInputApi(),
             codex,
-            new CodexShortcutResolver());
+            _codexShortcutResolver,
+            _deepSeekShortcutResolver);
         var adapter = WindowsControllerAdapterFactory.Create(
             _settings.ControllerType,
             _rc901aRawInputSource,
@@ -347,8 +360,9 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
         _lightbarAnimation = new CodexActivityLightbarAnimation();
         _runtime = new ControllerRuntime(
             adapter,
-            new ActionDispatcher(codex, executor),
-            _settings.Profile);
+            new ActionDispatcher(_foregroundAppService, executor),
+            _settings.GetProfile(_activeAgent));
+        _runtimeProfile = _settings.GetProfile(_activeAgent);
         ApplyLightbarColor(DateTimeOffset.UtcNow);
     }
 
@@ -720,6 +734,7 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
         };
         _stateDirty = true;
 
+        UpdateActiveProfile();
         if (controllerType != previousControllerType)
         {
             RebuildRuntime();
@@ -740,8 +755,10 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
 
     private async Task UpdateMappingAsync(JsonElement payload)
     {
+        if (!TryMappingAgent(payload, out var agent)) return;
+        var values = payload.TryGetProperty("mappings", out var nested) ? nested : payload;
         var mappings = new List<KeyValuePair<ControllerControl, MappedAction>>();
-        foreach (var property in payload.EnumerateObject())
+        foreach (var property in values.EnumerateObject())
         {
             if (TryControl(property.Name, out var control) &&
                 MappedActionCodec.TryParse(property.Value.GetString(), out var action))
@@ -749,13 +766,47 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
                 mappings.Add(new(control, action));
             }
         }
-        _settings = _settings with { Profile = _settings.Profile.WithMappings(mappings) };
+        var profile = _settings.GetProfile(agent).WithMappings(mappings);
+        _settings = agent == AgentTarget.Codex
+            ? _settings with { Profile = profile }
+            : _settings with { DeepSeekHarnessProfile = profile };
         _stateDirty = true;
-        _runtime?.UpdateProfile(_settings.Profile);
+        UpdateActiveProfile();
         await _settingsStore.SaveAsync(_settings, _cancellation.Token);
     }
 
-    private static string? DescribeLastAction(
+    private static bool TryMappingAgent(JsonElement payload, out AgentTarget agent)
+    {
+        agent = AgentTarget.Codex;
+        return !payload.TryGetProperty("agent", out var value) ||
+            (Enum.TryParse(value.GetString(), true, out agent) && Enum.IsDefined(agent));
+    }
+
+    private async Task ResetMappingsAsync(JsonElement payload)
+    {
+        if (!TryMappingAgent(payload, out var agent)) return;
+        _settings = agent == AgentTarget.Codex
+            ? _settings with { Profile = DefaultProfileFactory.Create() }
+            : _settings with { DeepSeekHarnessProfile = DefaultProfileFactory.CreateDeepSeekHarness() };
+        _stateDirty = true;
+        UpdateActiveProfile();
+        await _settingsStore.SaveAsync(_settings, _cancellation.Token);
+    }
+
+    private void UpdateActiveProfile()
+    {
+        var agent = _settings.CodexOnly
+            ? _foregroundAppService.GetForegroundAgent() ?? AgentTarget.Codex
+            : AgentTarget.Codex;
+        if (_activeAgent != agent) _stateDirty = true;
+        _activeAgent = agent;
+        var profile = _settings.GetProfile(agent);
+        if (ReferenceEquals(_runtimeProfile, profile)) return;
+        _runtime?.UpdateProfile(profile);
+        _runtimeProfile = profile;
+    }
+
+    private string? DescribeLastAction(
         RuntimeTickResult result,
         ControllerType controllerType)
     {
@@ -772,6 +823,15 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
                 Control: ControllerControl.TouchpadX or ControllerControl.TouchpadY,
             });
         if (input is null) return null;
+        if (_activeAgent == AgentTarget.DeepSeekHarness &&
+            _settings.DeepSeekHarnessProfile.TryGetAction(input.Control, out var action))
+        {
+            var command = _deepSeekShortcuts?.FirstOrDefault(option => option.Value == MappedActionCodec.Format(action));
+            if (command is not null) return $"{input.Control} → {command.Label} · {command.Shortcut}（DeepSeek Harness）";
+            var description = action.Shortcut is { } shortcut
+                ? FormatShortcut(shortcut) : MappedActionCodec.Format(action);
+            return $"{input.Control} → {description}（DeepSeek Harness）";
+        }
         if (controllerType == ControllerType.PlayStation5)
         {
             return input.Control switch
@@ -820,6 +880,8 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
     {
         var timestamp = DateTimeOffset.UtcNow;
         _microphoneStatus = _audioInputDetector.Detect();
+        _deepSeekShortcuts = _deepSeekShortcutResolver.GetShortcuts();
+        _codexShortcuts = _codexShortcutResolver.GetShortcuts();
         ConfigureCodexHooks();
 
         _codexActivity = _codexActivityStore.ReadStatus(timestamp);
@@ -848,7 +910,7 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
         }
     }
 
-    private bool PollCodexActivity(DateTimeOffset timestamp)
+    private bool PollIntegrations(DateTimeOffset timestamp)
     {
         if (timestamp < _nextIntegrationPoll)
         {
@@ -857,9 +919,15 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
 
         _nextIntegrationPoll = timestamp.Add(IntegrationPollInterval);
         var activity = _codexActivityStore.ReadStatus(timestamp);
+        var shortcuts = _deepSeekShortcutResolver.GetShortcuts();
+        var codexShortcuts = _codexShortcutResolver.GetShortcuts();
+        var shortcutsChanged = _deepSeekShortcuts is null || !_deepSeekShortcuts.SequenceEqual(shortcuts) ||
+            _codexShortcuts is null || !_codexShortcuts.SequenceEqual(codexShortcuts);
+        _deepSeekShortcuts = shortcuts;
+        _codexShortcuts = codexShortcuts;
         if (activity == _codexActivity)
         {
-            return false;
+            return shortcutsChanged;
         }
 
         _codexActivity = activity;
@@ -886,12 +954,13 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
 
     private RuntimeConfigurationPayload BuildConfiguration()
     {
-        if (!ReferenceEquals(_formattedProfile, _settings.Profile))
+        var profile = _settings.GetProfile(_activeAgent);
+        if (!ReferenceEquals(_formattedProfile, profile))
         {
-            _formattedMappings = _settings.Profile.Mappings.ToDictionary(
+            _formattedMappings = profile.Mappings.ToDictionary(
                 pair => FormatControl(pair.Key),
                 pair => MappedActionCodec.Format(pair.Value));
-            _formattedProfile = _settings.Profile;
+            _formattedProfile = profile;
         }
 
         return new RuntimeConfigurationPayload(
@@ -909,8 +978,22 @@ public sealed class ControllerRuntimeService : IAsyncDisposable
             _codexHookStatus,
             _codexActivity,
             _rc901aStatus,
-            BuildRc901aInputStatus());
+            BuildRc901aInputStatus(),
+            new Dictionary<string, IReadOnlyDictionary<string, string>>
+            {
+                ["codex"] = FormatMappings(_settings.Profile),
+                ["deepSeekHarness"] = FormatMappings(_settings.DeepSeekHarnessProfile),
+            },
+            _activeAgent,
+            new Dictionary<string, IReadOnlyList<AgentShortcutOption>>
+            {
+                ["codex"] = _codexShortcuts ??= _codexShortcutResolver.GetShortcuts(),
+                ["deepSeekHarness"] = _deepSeekShortcuts ??= _deepSeekShortcutResolver.GetShortcuts(),
+            });
     }
+
+    private static IReadOnlyDictionary<string, string> FormatMappings(MappingProfile profile) =>
+        profile.Mappings.ToDictionary(pair => FormatControl(pair.Key), pair => MappedActionCodec.Format(pair.Value));
 
     private static bool TryControl(string name, out ControllerControl control)
     {

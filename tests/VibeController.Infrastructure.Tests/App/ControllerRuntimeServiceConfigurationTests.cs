@@ -13,6 +13,118 @@ namespace VibeController.Infrastructure.Tests.App;
 public sealed class ControllerRuntimeServiceConfigurationTests
 {
     [Fact]
+    public async Task AgentCatalogs_InitializeAndAutomaticallyPublishChangedKeysWithoutChangingMappings()
+    {
+        var keybindingsPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"codex-keys-{Guid.NewGuid():N}.json");
+        try
+        {
+            var resolver = new CatalogResolver();
+            var store = new RecordingSettingsStore();
+            await using var service = new ControllerRuntimeService(store,
+                foregroundAppService: new CodexForeground(), deepSeekShortcutResolver: resolver,
+                codexShortcutResolver: new VibeController.Infrastructure.Windows.CodexShortcutResolver(keybindingsPath));
+            var initial = BuildConfiguration(service).AgentShortcuts!;
+            Assert.Equal("Ctrl+K", Assert.Single(initial["deepSeekHarness"]).Shortcut);
+            Assert.Equal("Enter", initial["codex"].Single(option => option.Value == "send").Shortcut);
+            resolver.Shortcut = "Ctrl+J";
+            System.IO.File.WriteAllText(keybindingsPath, "[{\"command\":\"composer.submit\",\"key\":\"Ctrl+Enter\"}]");
+            var changed = (bool)service.GetType().GetMethod("PollIntegrations", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .Invoke(service, [DateTimeOffset.UnixEpoch])!;
+            Assert.True(changed);
+            var updated = BuildConfiguration(service).AgentShortcuts!;
+            Assert.Equal("Ctrl+J", Assert.Single(updated["deepSeekHarness"]).Shortcut);
+            Assert.Equal("Ctrl+Enter", updated["codex"].Single(option => option.Value == "send").Shortcut);
+            Assert.Equal(0, store.SaveCount);
+            Assert.Equal("dictation", BuildConfiguration(service).AgentMappings!["codex"]["x"]);
+        }
+        finally { System.IO.File.Delete(keybindingsPath); }
+    }
+
+    private sealed class CatalogResolver : VibeController.Infrastructure.Windows.IDeepSeekShortcutResolver
+    {
+        public string Shortcut { get; set; } = "Ctrl+K";
+        public KeyboardShortcut Resolve(string commandId) => throw new NotSupportedException();
+        public IReadOnlyList<AgentShortcutOption> GetShortcuts() =>
+            [new("deepseek:session.search", "搜索任务", Shortcut, "custom")];
+    }
+
+    [Fact]
+    public async Task AgentProfiles_SaveAndResetIndependently_AndGlobalModeAlwaysUsesCodex()
+    {
+        var store = new RecordingSettingsStore();
+        var foreground = new AgentForeground { Agent = AgentTarget.DeepSeekHarness };
+        await using var service = new ControllerRuntimeService(store, foregroundAppService: foreground);
+        await service.HandleCommandAsync(Command("updateMapping", new
+        {
+            agent = "deepSeekHarness", mappings = new { x = "shortcut:Ctrl+J" },
+        }));
+        var configuration = BuildConfiguration(service);
+        Assert.Equal(AgentTarget.DeepSeekHarness, configuration.ActiveAgent);
+        Assert.Equal("shortcut:Ctrl+J", configuration.Mappings["x"]);
+        Assert.Equal("dictation", configuration.AgentMappings!["codex"]["x"]);
+        Assert.Equal("J", store.Settings.DeepSeekHarnessProfile.Mappings[ControllerControl.X].Shortcut!.Key);
+
+        foreground.Agent = AgentTarget.Codex;
+        UpdateActiveProfile(service);
+        Assert.Equal("dictation", BuildConfiguration(service).Mappings["x"]);
+        foreground.Agent = null;
+        UpdateActiveProfile(service);
+        Assert.Equal(AgentTarget.Codex, BuildConfiguration(service).ActiveAgent);
+
+        SetField(service, "_settings", store.Settings with { CodexOnly = false });
+        foreground.Agent = AgentTarget.DeepSeekHarness;
+        UpdateActiveProfile(service);
+        Assert.Equal(AgentTarget.Codex, BuildConfiguration(service).ActiveAgent);
+        Assert.Equal("dictation", BuildConfiguration(service).Mappings["x"]);
+
+        await service.HandleCommandAsync(Command("resetDefaults", new { agent = "deepSeekHarness" }));
+        Assert.Equal("dictation", BuildConfiguration(service).AgentMappings!["codex"]["x"]);
+        Assert.Equal("none", BuildConfiguration(service).AgentMappings!["deepSeekHarness"]["x"]);
+    }
+
+    [Fact]
+    public async Task AgentSwitch_UpdatesExistingRuntimeWithoutReEmittingHeldPress()
+    {
+        var store = new RecordingSettingsStore();
+        var foreground = new AgentForeground { Agent = AgentTarget.Codex };
+        var adapter = new DisposableAdapter();
+        var executor = new RecordingExecutor();
+        var runtime = new ControllerRuntime(adapter, new ActionDispatcher(foreground, executor), store.Settings.Profile);
+        await using var service = new ControllerRuntimeService(store, foregroundAppService: foreground);
+        SetField(service, "_runtime", runtime);
+        await service.HandleCommandAsync(Command("updateMapping", new { x = "shortcut:Ctrl+K" }));
+        foreground.Agent = AgentTarget.DeepSeekHarness;
+        await service.HandleCommandAsync(Command("updateMapping", new
+        {
+            agent = "deepSeekHarness", mappings = new { x = "shortcut:Ctrl+J" },
+        }));
+        var options = new RuntimeOptions(0, true, false, 0.12f,
+            new ActionExecutionOptions(true, new KeyboardShortcut("F12"), 1, 1, AgentTarget.DeepSeekHarness));
+        await runtime.TickAsync(options, DateTimeOffset.UnixEpoch);
+        Assert.Equal("J", Assert.Single(executor.Invocations).Action.Shortcut!.Key);
+        foreground.Agent = AgentTarget.Codex;
+        UpdateActiveProfile(service);
+        var next = await runtime.TickAsync(options with
+        {
+            ActionOptions = options.ActionOptions with { TargetAgent = AgentTarget.Codex },
+        }, DateTimeOffset.UnixEpoch.AddMilliseconds(16));
+        Assert.Empty(next.InputEvents);
+        Assert.Same(runtime, GetField<ControllerRuntime>(service, "_runtime"));
+        Assert.False(adapter.Disposed);
+    }
+
+    private static void UpdateActiveProfile(ControllerRuntimeService service) =>
+        service.GetType().GetMethod("UpdateActiveProfile", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(service, null);
+
+    private sealed class AgentForeground : IForegroundAppService
+    {
+        public AgentTarget? Agent { get; set; }
+        public bool IsCodexForeground() => Agent == AgentTarget.Codex;
+        public AgentTarget? GetForegroundAgent() => Agent;
+    }
+
+    [Fact]
     public async Task MappingSaveAndReset_KeepRuntimeAndAdapterAndPersistAuthoritativeProfile()
     {
         var store = new RecordingSettingsStore();
@@ -22,7 +134,7 @@ public sealed class ControllerRuntimeServiceConfigurationTests
             adapter,
             new ActionDispatcher(new CodexForeground(), executor),
             store.Settings.Profile);
-        await using var service = new ControllerRuntimeService(store);
+        await using var service = new ControllerRuntimeService(store, foregroundAppService: new CodexForeground());
         SetField(service, "_runtime", runtime);
 
         await service.HandleCommandAsync(Command("updateMapping", new
@@ -58,7 +170,7 @@ public sealed class ControllerRuntimeServiceConfigurationTests
     [Fact]
     public async Task ResetAlreadyDefaultProfile_StillAcknowledgesWithAuthoritativeConfiguration()
     {
-        await using var service = new ControllerRuntimeService(new RecordingSettingsStore());
+        await using var service = new ControllerRuntimeService(new RecordingSettingsStore(), foregroundAppService: new CodexForeground());
         var messages = new List<string>();
         service.StateJsonReady += messages.Add;
         var now = DateTimeOffset.UnixEpoch;
@@ -74,7 +186,7 @@ public sealed class ControllerRuntimeServiceConfigurationTests
     [Fact]
     public async Task RuntimePublication_OmitsHotConfigurationButReplaysAndFlushesPendingChanges()
     {
-        await using var service = new ControllerRuntimeService(new RecordingSettingsStore());
+        await using var service = new ControllerRuntimeService(new RecordingSettingsStore(), foregroundAppService: new CodexForeground());
         var messages = new List<string>();
         service.StateJsonReady += messages.Add;
         var now = DateTimeOffset.UnixEpoch;

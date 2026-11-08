@@ -6,6 +6,19 @@ namespace VibeController.Infrastructure.Tests.Windows;
 public sealed class KeyboardInputBuilderTests
 {
     [Fact]
+    public void Build_ChordPressesBothKeysBeforeReleasingEither()
+    {
+        var strokes = KeyboardInputBuilder.Build(new KeyboardShortcut("F", [KeyModifier.Control]) { SecondKey = "G" });
+        Assert.Collection(strokes,
+            stroke => AssertStroke(stroke, VirtualKey.Control, KeyDirection.Down),
+            stroke => AssertStroke(stroke, VirtualKey.F, KeyDirection.Down),
+            stroke => AssertStroke(stroke, VirtualKey.G, KeyDirection.Down),
+            stroke => AssertStroke(stroke, VirtualKey.G, KeyDirection.Up),
+            stroke => AssertStroke(stroke, VirtualKey.F, KeyDirection.Up),
+            stroke => AssertStroke(stroke, VirtualKey.Control, KeyDirection.Up));
+    }
+
+    [Fact]
     public void Build_CreatesModifierDownKeyPressAndReverseReleaseOrder()
     {
         var shortcut = new KeyboardShortcut(

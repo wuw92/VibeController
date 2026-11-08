@@ -6,6 +6,22 @@ namespace VibeController.Infrastructure.Tests.Windows;
 
 public sealed class CodexShortcutResolverTests : IDisposable
 {
+    [Fact]
+    public void GetShortcuts_ReportsEffectiveKeysAndUnboundCommandsBeforeAnyActionIsExecuted()
+    {
+        WriteBindings(("composer.submit", "Ctrl+Enter"), ("globalDictationToggle", null));
+        var resolver = new CodexShortcutResolver(KeybindingsPath);
+        var shortcuts = resolver.GetShortcuts();
+        var send = Assert.Single(shortcuts.Where(option => option.Value == "send"));
+        Assert.Equal("Ctrl+Enter", send.Shortcut);
+        Assert.Equal("custom", send.Source);
+        var dictation = Assert.Single(shortcuts.Where(option => option.Value == "dictation"));
+        Assert.Null(dictation.Shortcut);
+        Assert.NotNull(dictation.Message);
+        WriteBindings(("composer.submit", "Ctrl+Shift+Enter"));
+        Assert.Equal("Ctrl+Shift+Enter", resolver.GetShortcuts().Single(option => option.Value == "send").Shortcut);
+    }
+
     private readonly string _directory = Path.Combine(
         Path.GetTempPath(),
         "VibeController.Tests",

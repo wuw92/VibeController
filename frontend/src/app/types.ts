@@ -1,5 +1,13 @@
 export type ConnectionState = "unknown" | "connected" | "disconnected";
 export type ControllerType = "xbox" | "playStation5" | "tclRc901a";
+export type AgentTarget = "codex" | "deepSeekHarness";
+export interface AgentShortcutOption {
+  value: string;
+  label: string;
+  shortcut: string | null;
+  source: "default" | "custom" | "fixed" | "error";
+  message: string | null;
+}
 export type MicrophoneDetectionState = "available" | "noDevices" | "error";
 export type CodexActivityState = "idle" | "working" | "needsAttention" | "completed";
 export type Rc901aConnectionState =
@@ -145,6 +153,9 @@ export interface RuntimeConfiguration {
   deadZone: number;
   startWithWindows: boolean;
   mappings: Record<string, string>;
+  agentMappings?: Record<AgentTarget, Record<string, string>>;
+  activeAgent?: AgentTarget;
+  agentShortcuts?: Record<AgentTarget, AgentShortcutOption[]>;
   codexLightbarEnabled?: boolean;
   microphone?: MicrophoneStatus;
   codexHook?: CodexHookRegistrationStatus;

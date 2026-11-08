@@ -8,6 +8,24 @@ namespace VibeController.Infrastructure.Tests.Settings;
 
 public sealed class JsonSettingsStoreTests : IDisposable
 {
+    [Fact]
+    public async Task SaveAndLoad_KeepsSeparateAgentProfilesWithoutMigratingDeepSeekBindings()
+    {
+        var store = new JsonSettingsStore(_directory);
+        await store.SaveAsync(AppSettings.CreateDefault() with
+        {
+            Profile = DefaultProfileFactory.Create().WithMapping(ControllerControl.X,
+                new(MappedActionKind.KeyboardShortcut, new KeyboardShortcut("K"))),
+            DeepSeekHarnessProfile = DefaultProfileFactory.CreateDeepSeekHarness()
+                .WithMapping(ControllerControl.X, new(MappedActionKind.KeyboardShortcut, new KeyboardShortcut("J")))
+                .WithMapping(ControllerControl.DPadLeft, new(MappedActionKind.KeyboardShortcut, new KeyboardShortcut("ArrowLeft"))),
+        });
+        var settings = await store.LoadAsync();
+        Assert.Equal("K", settings.Profile.Mappings[ControllerControl.X].Shortcut!.Key);
+        Assert.Equal("J", settings.DeepSeekHarnessProfile.Mappings[ControllerControl.X].Shortcut!.Key);
+        Assert.Equal("ArrowLeft", settings.DeepSeekHarnessProfile.Mappings[ControllerControl.DPadLeft].Shortcut!.Key);
+    }
+
     private readonly string _directory = Path.Combine(
         Path.GetTempPath(),
         "VibeController.Tests",

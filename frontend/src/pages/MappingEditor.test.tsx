@@ -27,6 +27,38 @@ function MappingEditor(props: ComponentProps<typeof HostMappingEditor>) {
 afterEach(cleanup);
 
 describe("MappingEditor", () => {
+  it("shows Codex effective keys outside the operation menu and follows host updates", () => {
+    const props = { onSave: vi.fn(), onReset: vi.fn(), initialValues: { x: "send" } };
+    const { rerender } = render(<HostMappingEditor {...props} shortcutOptions={[
+      { value: "send", label: "发送消息", shortcut: "Ctrl+Enter", source: "custom", message: null },
+    ]} />);
+    expect(screen.getByRole("option", { name: "发送消息" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /Ctrl|Enter/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "当前生效快捷键" })).toHaveTextContent("Ctrl+Enter");
+    rerender(<HostMappingEditor {...props} shortcutOptions={[
+      { value: "send", label: "发送消息", shortcut: "Ctrl+Shift+Enter", source: "custom", message: null },
+    ]} />);
+    expect(screen.getByRole("region", { name: "当前生效快捷键" })).toHaveTextContent("Ctrl+Shift+Enter");
+  });
+
+  it("confirms saving only after the host acknowledges the submitted profile", () => {
+    const props = { onSave: vi.fn(), onReset: vi.fn() };
+    const { rerender } = render(<HostMappingEditor {...props} initialValues={{ x: "send" }} />);
+    fireEvent.click(screen.getByRole("button", { name: "保存映射" }));
+    expect(screen.getByText("正在保存…")).toBeInTheDocument();
+    expect(screen.queryByText("映射已保存")).not.toBeInTheDocument();
+    rerender(<HostMappingEditor {...props} initialValues={{ x: "send" }} />);
+    expect(screen.getByText("映射已保存")).toBeInTheDocument();
+  });
+
+  it("requires a recorded key before saving a custom shortcut", () => {
+    render(<HostMappingEditor onSave={vi.fn()} onReset={vi.fn()} initialValues={{ x: "send" }} />);
+    fireEvent.change(screen.getByLabelText("绑定操作"), { target: { value: "keyboardShortcut" } });
+    expect(screen.getByRole("button", { name: "保存映射" })).toBeDisabled();
+    fireEvent.keyDown(screen.getByLabelText("自定义快捷键"), { key: "K", ctrlKey: true });
+    expect(screen.getByRole("button", { name: "保存映射" })).toBeEnabled();
+  });
+
   it("preserves edits made after submission when a delayed save acknowledgement arrives", () => {
     const onSave = vi.fn();
     const onReset = vi.fn();
@@ -99,7 +131,7 @@ describe("MappingEditor", () => {
     fireEvent.click(screen.getByRole("button", { name: "保存映射" }));
 
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ x: "commandPalette" }));
-    expect(screen.getByText("映射已保存")).toBeInTheDocument();
+    expect(screen.getByText("正在保存…")).toBeInTheDocument();
   });
 
   it("warns when two controls use the same exclusive shortcut", () => {
@@ -137,7 +169,7 @@ describe("MappingEditor", () => {
 
     expect(screen.queryByRole("option", { name: "上一个模型" })).not.toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "下一个模型" })).not.toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "Esc（取消 / 返回）" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "取消 / 返回" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "保存映射" }));
 
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
@@ -166,11 +198,11 @@ describe("MappingEditor", () => {
   it("explains automatic Codex shortcut lookup only for Codex semantic actions", () => {
     render(<MappingEditor onSave={vi.fn()} onReset={vi.fn()} />);
 
-    expect(screen.getByText("首次触发时读取 Codex 当前快捷键；修改 Codex 设置后会自动刷新。")).toBeInTheDocument();
+    expect(screen.getByText("由 Codex 管理，设置变化后自动同步。")).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("绑定操作"), { target: { value: "keyboardShortcut" } });
 
-    expect(screen.queryByText("首次触发时读取 Codex 当前快捷键；修改 Codex 设置后会自动刷新。")).not.toBeInTheDocument();
+    expect(screen.queryByText("由 Codex 管理，设置变化后自动同步。")).not.toBeInTheDocument();
   });
 
   it("offers recent-task and tab navigation without changing the default bindings", () => {

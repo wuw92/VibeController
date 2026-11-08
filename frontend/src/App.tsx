@@ -2,7 +2,7 @@ import { useState } from "react";
 import { AppShell } from "./components/AppShell";
 import type { AppPage } from "./components/AppShell";
 import { Dashboard } from "./pages/Dashboard";
-import { MappingEditor } from "./pages/MappingEditor";
+import { AgentMappingEditor } from "./pages/AgentMappingEditor";
 import { Settings } from "./pages/Settings";
 import { appBridge } from "./app/AppBridge";
 import { useRuntimeState } from "./app/useRuntimeState";
@@ -25,11 +25,10 @@ export default function App() {
     <AppShell page={page} onNavigate={setPage}>
       {page === "dashboard" && <Dashboard state={state} onToggleMapping={toggleMapping} onToggleTestMode={toggleTestMode} />}
       {page === "mapping" && (
-        <MappingEditor
-          controllerType={state.configuration?.controllerType}
-          initialValues={state.configuration?.mappings}
-          onSave={(mapping) => appBridge.send("updateMapping", mapping)}
-          onReset={() => appBridge.send("resetDefaults", {})}
+        <AgentMappingEditor
+          configuration={state.configuration}
+          onSave={(agent, mappings) => appBridge.send("updateMapping", { agent, mappings })}
+          onReset={(agent) => appBridge.send("resetDefaults", { agent })}
         />
       )}
       {page === "settings" && (
